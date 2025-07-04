@@ -104,6 +104,7 @@ interface Link {
 interface LinksTableProps {
   folderId?: string;
   showFolderFilter?: boolean;
+  limit?: number;
 }
 
 export function LinksTable({

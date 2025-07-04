@@ -1,3 +1,4 @@
+// ============= Fixed models/User.ts =============
 import mongoose, { Schema, Document } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 
@@ -172,7 +173,7 @@ const UserSchema = new Schema<IUser>({
   timestamps: true
 });
 
-// Indexes - NO DUPLICATES
+// Indexes
 UserSchema.index({ email: 1 }, { unique: true });
 UserSchema.index({ role: 1, plan: 1 });
 UserSchema.index({ 'subscription.stripeCustomerId': 1 });
@@ -181,21 +182,53 @@ UserSchema.index({ 'team.teamId': 1 });
 
 // Pre-save middleware for password hashing
 UserSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+  // Only hash the password if it's new or modified AND not already hashed
+  if (!this.isModified('password') || !this.password) {
+    return next();
+  }
   
   try {
-    this.password = await bcrypt.hash(this.password!, 10);
+    // Check if password is already hashed (bcrypt hashes start with $2a$, $2b$, or $2y$)
+    if (this.password.match(/^\$2[aby]\$/)) {
+      console.log('Password already hashed, skipping hash step');
+      return next();
+    }
+    
+    console.log('Hashing password in pre-save middleware');
+    const saltRounds = 10;
+    this.password = await bcrypt.hash(this.password, saltRounds);
+    console.log('Password hashed successfully');
     next();
   } catch (error) {
+    console.error('Error hashing password:', error);
     next(error as Error);
   }
 });
 
 // Instance method for password comparison
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
-  if (!this.password) return false;
-  return bcrypt.compare(candidatePassword, this.password);
+  if (!this.password) {
+    console.log('No password found for comparison');
+    return false;
+  }
+  
+  try {
+    const result = await bcrypt.compare(candidatePassword, this.password);
+    console.log('Password comparison result:', result);
+    return result;
+  } catch (error) {
+    console.error('Error comparing password:', error);
+    return false;
+  }
+};
+
+// Static method to create user with hashed password
+UserSchema.statics.createWithHashedPassword = async function(userData: any) {
+  const hashedPassword = await bcrypt.hash(userData.password, 10);
+  return this.create({
+    ...userData,
+    password: hashedPassword
+  });
 };
 
 export const User = mongoose.models.User || mongoose.model<IUser>('User', UserSchema);
-

@@ -1,37 +1,34 @@
 import mongoose, { Schema, Document } from 'mongoose';
+
 export interface ISettings extends Document {
   _id: string;
   
-  // System-wide settings (only admins can modify)
   system: {
     appName: string;
     appDescription: string;
     appUrl: string;
     supportEmail: string;
     
-    // Email configuration
     smtp: {
-      host: string;
+      host?: string;
       port: number;
       secure: boolean;
-      username: string;
-      password: string;
+      username?: string;
+      password?: string;
       fromName: string;
-      fromEmail: string;
+      fromEmail?: string;
     };
     
-    // Security settings
     security: {
       enforceSSL: boolean;
       maxLoginAttempts: number;
-      lockoutDuration: number; // in minutes
-      sessionTimeout: number; // in minutes
+      lockoutDuration: number;
+      sessionTimeout: number;
       passwordMinLength: number;
       requireEmailVerification: boolean;
       enableTwoFactor: boolean;
     };
     
-    // Rate limiting
     rateLimiting: {
       enabled: boolean;
       windowMs: number;
@@ -39,9 +36,8 @@ export interface ISettings extends Document {
       skipSuccessfulRequests: boolean;
     };
     
-    // File uploads
     uploads: {
-      maxFileSize: number; // in bytes
+      maxFileSize: number;
       allowedImageTypes: string[];
       allowedDocumentTypes: string[];
       storageProvider: 'local' | 's3' | 'cloudinary';
@@ -53,7 +49,6 @@ export interface ISettings extends Document {
       };
     };
     
-    // Analytics
     analytics: {
       enableGoogleAnalytics: boolean;
       googleAnalyticsId?: string;
@@ -61,7 +56,6 @@ export interface ISettings extends Document {
       retentionDays: number;
     };
     
-    // Integrations
     integrations: {
       stripe: {
         enabled: boolean;
@@ -82,7 +76,6 @@ export interface ISettings extends Document {
     };
   };
   
-  // Default limits for new users
   defaultLimits: {
     free: {
       linksPerMonth: number;
@@ -104,7 +97,6 @@ export interface ISettings extends Document {
     };
   };
   
-  // Feature flags
   features: {
     enableSignup: boolean;
     enableTeams: boolean;
@@ -116,7 +108,6 @@ export interface ISettings extends Document {
     maintenanceMode: boolean;
   };
   
-  // Timestamps
   createdAt: Date;
   updatedAt: Date;
   lastModifiedBy: mongoose.Types.ObjectId;
@@ -134,7 +125,7 @@ const SettingsSchema = new Schema<ISettings>({
       port: { type: Number, default: 587 },
       secure: { type: Boolean, default: false },
       username: { type: String },
-      password: { type: String },
+      password: { type: String, select: false },
       fromName: { type: String, default: 'URL Shortener' },
       fromEmail: { type: String }
     },
@@ -143,7 +134,7 @@ const SettingsSchema = new Schema<ISettings>({
       enforceSSL: { type: Boolean, default: true },
       maxLoginAttempts: { type: Number, default: 5 },
       lockoutDuration: { type: Number, default: 15 },
-      sessionTimeout: { type: Number, default: 1440 }, // 24 hours
+      sessionTimeout: { type: Number, default: 1440 },
       passwordMinLength: { type: Number, default: 8 },
       requireEmailVerification: { type: Boolean, default: true },
       enableTwoFactor: { type: Boolean, default: false }
@@ -151,31 +142,21 @@ const SettingsSchema = new Schema<ISettings>({
     
     rateLimiting: {
       enabled: { type: Boolean, default: true },
-      windowMs: { type: Number, default: 900000 }, // 15 minutes
+      windowMs: { type: Number, default: 900000 },
       maxRequests: { type: Number, default: 100 },
       skipSuccessfulRequests: { type: Boolean, default: false }
     },
     
     uploads: {
-      maxFileSize: { type: Number, default: 5242880 }, // 5MB
-      allowedImageTypes: { 
-        type: [String], 
-        default: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] 
-      },
-      allowedDocumentTypes: { 
-        type: [String], 
-        default: ['text/csv', 'application/json'] 
-      },
-      storageProvider: { 
-        type: String, 
-        enum: ['local', 's3', 'cloudinary'], 
-        default: 'local' 
-      },
+      maxFileSize: { type: Number, default: 5242880 },
+      allowedImageTypes: [{ type: String, default: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }],
+      allowedDocumentTypes: [{ type: String, default: ['pdf', 'doc', 'docx'] }],
+      storageProvider: { type: String, enum: ['local', 's3', 'cloudinary'], default: 'local' },
       s3Config: {
         bucket: { type: String },
         region: { type: String },
         accessKeyId: { type: String },
-        secretAccessKey: { type: String }
+        secretAccessKey: { type: String, select: false }
       }
     },
     
@@ -190,18 +171,18 @@ const SettingsSchema = new Schema<ISettings>({
       stripe: {
         enabled: { type: Boolean, default: false },
         publicKey: { type: String },
-        secretKey: { type: String },
-        webhookSecret: { type: String }
+        secretKey: { type: String, select: false },
+        webhookSecret: { type: String, select: false }
       },
       google: {
         enabled: { type: Boolean, default: false },
         clientId: { type: String },
-        clientSecret: { type: String }
+        clientSecret: { type: String, select: false }
       },
       facebook: {
         enabled: { type: Boolean, default: false },
         appId: { type: String },
-        appSecret: { type: String }
+        appSecret: { type: String, select: false }
       }
     }
   },

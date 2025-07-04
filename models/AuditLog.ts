@@ -1,22 +1,19 @@
 import mongoose, { Schema, Document } from 'mongoose';
+
 export interface IAuditLog extends Document {
   _id: string;
-  
-  // Who performed the action
   userId?: mongoose.Types.ObjectId;
   userEmail?: string;
   userName?: string;
   
-  // What action was performed
-  action: string; // e.g., 'create_url', 'delete_user', 'update_settings'
-  resource: string; // e.g., 'url', 'user', 'team', 'settings'
+  action: string;
+  resource: string;
   resourceId?: string;
   
-  // Action details
   details: {
     method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
     endpoint?: string;
-    changes?: {
+    changes: {
       field: string;
       oldValue?: any;
       newValue?: any;
@@ -24,7 +21,6 @@ export interface IAuditLog extends Document {
     metadata?: Record<string, any>;
   };
   
-  // Context
   context: {
     ip: string;
     userAgent: string;
@@ -33,48 +29,40 @@ export interface IAuditLog extends Document {
     teamId?: mongoose.Types.ObjectId;
   };
   
-  // Result
   result: {
     success: boolean;
     statusCode?: number;
     error?: string;
-    duration?: number; // in milliseconds
+    duration?: number;
   };
   
-  // Risk assessment
   risk: {
     level: 'low' | 'medium' | 'high' | 'critical';
-    factors: string[]; // e.g., ['unusual_time', 'new_location', 'admin_action']
-    score: number; // 0-100
+    factors: string[];
+    score: number;
   };
   
-  // Timestamp
   timestamp: Date;
-  
-  // Retention
   expiresAt?: Date;
 }
 
 const AuditLogSchema = new Schema<IAuditLog>({
   userId: { 
     type: Schema.Types.ObjectId, 
-    ref: 'User',
-    index: true
+    ref: 'User'
   },
-  userEmail: { type: String, index: true },
+  userEmail: { type: String },
   userName: { type: String },
   
   action: { 
     type: String, 
-    required: true,
-    index: true
+    required: true
   },
   resource: { 
     type: String, 
-    required: true,
-    index: true
+    required: true
   },
-  resourceId: { type: String, index: true },
+  resourceId: { type: String },
   
   details: {
     method: { 
@@ -95,12 +83,12 @@ const AuditLogSchema = new Schema<IAuditLog>({
     ip: { type: String, required: true },
     userAgent: { type: String, required: true },
     sessionId: { type: String },
-    requestId: { type: String, index: true },
+    requestId: { type: String },
     teamId: { type: Schema.Types.ObjectId, ref: 'Team' }
   },
   
   result: {
-    success: { type: Boolean, required: true, index: true },
+    success: { type: Boolean, required: true },
     statusCode: { type: Number },
     error: { type: String },
     duration: { type: Number }
@@ -110,8 +98,7 @@ const AuditLogSchema = new Schema<IAuditLog>({
     level: { 
       type: String, 
       enum: ['low', 'medium', 'high', 'critical'], 
-      required: true,
-      index: true
+      required: true
     },
     factors: [{ type: String }],
     score: { type: Number, min: 0, max: 100, required: true }
@@ -119,28 +106,22 @@ const AuditLogSchema = new Schema<IAuditLog>({
   
   timestamp: { 
     type: Date, 
-    default: Date.now, 
-    index: true 
+    default: Date.now
   },
   
-  expiresAt: { type: Date, index: true }
+  expiresAt: { type: Date }
 }, {
   timestamps: false, // We use custom timestamp
   collection: 'auditlogs'
 });
 
-// Indexes for efficient querying
+// Clean indexes for audit logs
 AuditLogSchema.index({ timestamp: -1 });
 AuditLogSchema.index({ userId: 1, timestamp: -1 });
 AuditLogSchema.index({ action: 1, timestamp: -1 });
 AuditLogSchema.index({ 'risk.level': 1, timestamp: -1 });
 AuditLogSchema.index({ 'result.success': 1, timestamp: -1 });
-
-// Compound indexes
 AuditLogSchema.index({ resource: 1, action: 1, timestamp: -1 });
-AuditLogSchema.index({ userId: 1, action: 1, timestamp: -1 });
-
-// TTL index for automatic cleanup (if expiresAt is set)
 AuditLogSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const AuditLog = mongoose.models.AuditLog || mongoose.model<IAuditLog>('AuditLog', AuditLogSchema);

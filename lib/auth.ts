@@ -1,4 +1,4 @@
-// ============= lib/auth.ts =============
+// ============= Fixed lib/auth.ts =============
 import { NextAuthOptions, User as NextAuthUser, Session, DefaultSession, DefaultUser } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import GoogleProvider from 'next-auth/providers/google';
@@ -35,7 +35,16 @@ declare module 'next-auth/jwt' {
   }
 }
 
-const client = new MongoClient(process.env.MONGODB_URI!);
+// Check environment variables
+if (!process.env.NEXTAUTH_SECRET) {
+  throw new Error('NEXTAUTH_SECRET environment variable is required');
+}
+
+if (!process.env.MONGODB_URI) {
+  throw new Error('MONGODB_URI environment variable is required');
+}
+
+const client = new MongoClient(process.env.MONGODB_URI);
 const clientPromise = Promise.resolve(client);
 
 export const authOptions: NextAuthOptions = {
@@ -48,79 +57,94 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' }
       },
      
-     async authorize(credentials, req) {
-       if (!credentials?.email || !credentials?.password) {
-         return null;
-       }
+      async authorize(credentials, req) {
+        console.log('🔐 Auth attempt started for:', credentials?.email);
+        
+        if (!credentials?.email || !credentials?.password) {
+          console.log('❌ Missing credentials');
+          return null;
+        }
      
-       try {
-         await connectDB();
-         
-         const user = await User.findOne({ 
-           email: credentials.email.toLowerCase(),
-           isDeleted: false 
-         });
+        try {
+          console.log('🔌 Connecting to database...');
+          await connectDB();
+          console.log('✅ Database connected');
+          
+          const user = await User.findOne({ 
+            email: credentials.email.toLowerCase(),
+            isDeleted: false 
+          });
+          
+          console.log('👤 User found:', !!user);
+          console.log('🔑 User has password:', !!(user?.password));
      
-         if (!user || !user.password) {
-           await logLoginAttempt(credentials.email, req, false, 'Invalid credentials');
-           return null;
-         }
+          if (!user || !user.password) {
+            await logLoginAttempt(credentials.email, req, false, 'Invalid credentials');
+            console.log('❌ User not found or no password');
+            return null;
+          }
      
-         // Check if account is locked
-         if (user.security.lockedUntil && user.security.lockedUntil > new Date()) {
-           await logLoginAttempt(credentials.email, req, false, 'Account locked');
-           return null;
-         }
+          // Check if account is locked
+          if (user.security.lockedUntil && user.security.lockedUntil > new Date()) {
+            await logLoginAttempt(credentials.email, req, false, 'Account locked');
+            console.log('❌ Account locked until:', user.security.lockedUntil);
+            return null;
+          }
      
-         // Use the comparePassword method
-         const isValid = await user.comparePassword(credentials.password);
-         
-         if (!isValid) {
-           // Increment login attempts
-           user.security.loginAttempts += 1;
-           
-           // Lock account after max attempts
-           if (user.security.loginAttempts >= 5) {
-             user.security.lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-           }
-           
-           await user.save();
-           await logLoginAttempt(credentials.email, req, false, 'Invalid password');
-           return null;
-         }
+          console.log('🔍 Comparing password...');
+          // Use the comparePassword method
+          const isValid = await user.comparePassword(credentials.password);
+          console.log('✅ Password valid:', isValid);
+          
+          if (!isValid) {
+            // Increment login attempts
+            user.security.loginAttempts += 1;
+            
+            // Lock account after max attempts
+            if (user.security.loginAttempts >= 5) {
+              user.security.lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+            }
+            
+            await user.save();
+            await logLoginAttempt(credentials.email, req, false, 'Invalid password');
+            console.log('❌ Invalid password');
+            return null;
+          }
      
-         // Check if account is active
-         if (!user.isActive) {
-           await logLoginAttempt(credentials.email, req, false, 'Account inactive');
-           return null;
-         }
+          // Check if account is active
+          if (!user.isActive) {
+            await logLoginAttempt(credentials.email, req, false, 'Account inactive');
+            console.log('❌ Account inactive');
+            return null;
+          }
      
-         // Reset login attempts on successful login
-         user.security.loginAttempts = 0;
-         user.security.lockedUntil = undefined;
-         user.lastLoginAt = new Date();
-         user.lastActiveAt = new Date();
-         await user.save();
+          // Reset login attempts on successful login
+          user.security.loginAttempts = 0;
+          user.security.lockedUntil = undefined;
+          user.lastLoginAt = new Date();
+          user.lastActiveAt = new Date();
+          await user.save();
      
-         // Log successful login
-         await logLoginAttempt(credentials.email, req, true);
+          // Log successful login
+          await logLoginAttempt(credentials.email, req, true);
+          console.log('✅ Login successful for:', user.email);
      
-         return {
-           id: user._id.toString(),
-           name: user.name,
-           email: user.email,
-           image: user.image,
-           role: user.role,
-           plan: user.plan,
-           emailVerified: user.emailVerified,
-           isActive: user.isActive,
-           team: user.team
-         };
-       } catch (error) {
-         console.error('Auth error:', error);
-         return null;
-       }
-     }
+          return {
+            id: user._id.toString(),
+            name: user.name,
+            email: user.email,
+            image: user.image,
+            role: user.role,
+            plan: user.plan,
+            emailVerified: user.emailVerified,
+            isActive: user.isActive,
+            team: user.team
+          };
+        } catch (error) {
+          console.error('❌ Auth error:', error);
+          return null;
+        }
+      }
     }),
     
     GoogleProvider({
@@ -229,6 +253,24 @@ export const authOptions: NextAuthOptions = {
   },
   
   secret: process.env.NEXTAUTH_SECRET,
+  
+  // Add debug mode for development
+  debug: process.env.NODE_ENV === 'development',
+  
+  // Add logger for better debugging
+  logger: {
+    error(code, metadata) {
+      console.error('NextAuth Error:', code, metadata);
+    },
+    warn(code) {
+      console.warn('NextAuth Warning:', code);
+    },
+    debug(code, metadata) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('NextAuth Debug:', code, metadata);
+      }
+    }
+  }
 };
 
 // Helper function to log login attempts

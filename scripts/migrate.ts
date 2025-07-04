@@ -1,4 +1,4 @@
-// scripts/migrate.ts
+// ============= Updated scripts/migrate.ts =============
 import mongoose from 'mongoose';
 import * as dotenv from 'dotenv';
 import * as bcrypt from 'bcryptjs';
@@ -77,168 +77,271 @@ async function createIndexes() {
   }
 }
 
+async function createOrFixAdminUser() {
+  console.log('👤 Creating/fixing admin user...');
+  
+  try {
+    const { User } = await loadModels();
+    
+    // Check if admin user exists
+    let adminUser = await User.findOne({ 
+      email: 'admin@onlink.local',
+      isDeleted: false 
+    });
+
+    const adminPassword = 'admin123';
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
+    if (!adminUser) {
+      console.log('📝 Creating new admin user...');
+      
+      // Create admin user with pre-hashed password to avoid middleware issues
+      adminUser = await User.create({
+        name: 'System Admin',
+        email: 'admin@onlink.local',
+        password: hashedPassword, // Pre-hashed
+        role: 'admin',
+        plan: 'enterprise',
+        isEmailVerified: true,
+        isActive: true,
+        usage: {
+          linksCount: 0,
+          clicksCount: 0,
+          monthlyLinks: 0,
+          monthlyClicks: 0,
+          resetDate: new Date(),
+          lastUpdated: new Date()
+        },
+        preferences: {
+          timezone: 'UTC',
+          language: 'en',
+          dateFormat: 'MM/DD/YYYY',
+          notifications: {
+            email: true,
+            marketing: false,
+            security: true,
+            analytics: true
+          },
+          privacy: {
+            publicProfile: false,
+            shareAnalytics: false
+          }
+        },
+        security: {
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          ipWhitelist: []
+        }
+      });
+
+      console.log('✅ Admin user created successfully');
+      
+    } else {
+      console.log('✅ Admin user found');
+      
+      // Check if password exists and is valid
+      if (!adminUser.password) {
+        console.log('🔧 Admin user has no password, setting password...');
+        
+        // Update password directly in database to bypass middleware
+        await User.updateOne(
+          { _id: adminUser._id },
+          { 
+            $set: { 
+              password: hashedPassword,
+              'security.loginAttempts': 0,
+              'security.lockedUntil': null,
+              lastPasswordChange: new Date()
+            }
+          }
+        );
+        
+        console.log('✅ Admin password set successfully');
+        
+      } else {
+        console.log('✅ Admin user already has password');
+        
+        // Test if current password works
+        const isValidPassword = await bcrypt.compare(adminPassword, adminUser.password);
+        if (!isValidPassword) {
+          console.log('🔧 Admin password invalid, updating...');
+          
+          await User.updateOne(
+            { _id: adminUser._id },
+            { 
+              $set: { 
+                password: hashedPassword,
+                'security.loginAttempts': 0,
+                'security.lockedUntil': null,
+                lastPasswordChange: new Date()
+              }
+            }
+          );
+          
+          console.log('✅ Admin password updated successfully');
+        }
+      }
+      
+      // Ensure account is not locked
+      if (adminUser.security.lockedUntil) {
+        await User.updateOne(
+          { _id: adminUser._id },
+          { 
+            $unset: { 'security.lockedUntil': 1 },
+            $set: { 'security.loginAttempts': 0 }
+          }
+        );
+        console.log('🔓 Admin account unlocked');
+      }
+    }
+
+    // Verify the password works
+    const updatedUser = await User.findOne({ email: 'admin@onlink.local' });
+    if (updatedUser && updatedUser.password) {
+      const passwordTest = await bcrypt.compare(adminPassword, updatedUser.password);
+      if (passwordTest) {
+        console.log('✅ Admin password verification: PASSED');
+        console.log('📧 Admin credentials: admin@onlink.local / admin123');
+      } else {
+        console.log('❌ Admin password verification: FAILED');
+      }
+    }
+
+    return updatedUser;
+    
+  } catch (error) {
+    console.error('❌ Error creating/fixing admin user:', error);
+    throw error;
+  }
+}
+
 async function seedDefaultData() {
   console.log('🌱 Seeding default data...');
   
   try {
     const { User, Settings, Domain } = await loadModels();
     
+    // Create/fix admin user first
+    const adminUser = await createOrFixAdminUser();
+    
     // Check if settings already exist
     const existingSettings = await Settings.findOne();
     if (existingSettings) {
-      console.log('ℹ️  Default data already exists, skipping...');
-      return;
+      console.log('ℹ️  Settings already exist, skipping settings creation...');
+    } else {
+      // Create default settings
+      await Settings.create({
+        system: {
+          appName: 'OnLink',
+          appDescription: 'Professional URL shortening service',
+          appUrl: process.env.NEXTAUTH_URL || 'http://localhost:3000',
+          supportEmail: 'support@onlink.local',
+          smtp: {
+            host: '',
+            port: 587,
+            secure: false,
+            username: '',
+            password: '',
+            fromName: 'OnLink',
+            fromEmail: 'noreply@onlink.local'
+          },
+          security: {
+            enforceSSL: false, // Development mode
+            maxLoginAttempts: 5,
+            lockoutDuration: 15,
+            sessionTimeout: 24,
+            passwordMinLength: 8,
+            requireMFA: false
+          },
+          analytics: {
+            provider: 'internal',
+            trackingCode: '',
+            enableCustomAnalytics: true,
+            retentionDays: 365
+          },
+          integrations: {
+            stripe: { enabled: false },
+            google: { enabled: false },
+            facebook: { enabled: false }
+          }
+        },
+        defaultLimits: {
+          free: {
+            linksPerMonth: 5,
+            clicksPerMonth: 1000,
+            customDomains: 0,
+            analytics: false
+          },
+          premium: {
+            linksPerMonth: -1,
+            clicksPerMonth: -1,
+            customDomains: 3,
+            analytics: true
+          },
+          enterprise: {
+            linksPerMonth: -1,
+            clicksPerMonth: -1,
+            customDomains: -1,
+            analytics: true
+          }
+        },
+        features: {
+          enableSignup: true,
+          enableTeams: true,
+          enableCustomDomains: true,
+          enableQRCodes: true,
+          enableBulkOperations: true,
+          enableAPIAccess: true,
+          enableWhiteLabel: false,
+          maintenanceMode: false
+        },
+        lastModifiedBy: adminUser._id
+      });
+
+      console.log('✅ Default settings created');
     }
 
-    // Create default admin user
-    const hashedPassword = await bcrypt.hash('admin123', 10);
-    
-    const adminUser = await User.create({
-      name: 'System Admin',
-      email: 'admin@onlink.local',
-      password: hashedPassword,
-      role: 'admin',
-      plan: 'enterprise',
-      isEmailVerified: true,
-      isActive: true,
-      usage: {
-        linksCount: 0,
-        clicksCount: 0,
-        monthlyLinks: 0,
-        monthlyClicks: 0,
-        resetDate: new Date(),
-        lastUpdated: new Date()
-      },
-      preferences: {
-        timezone: 'UTC',
-        language: 'en',
-        dateFormat: 'MM/DD/YYYY',
-        notifications: {
-          email: true,
-          marketing: false,
-          security: true,
-          analytics: true
-        },
-        privacy: {
-          publicProfile: false,
-          shareAnalytics: false
-        }
-      },
-      security: {
-        twoFactorEnabled: false,
-        loginAttempts: 0,
-        ipWhitelist: []
-      }
-    });
-
-    console.log('✅ Admin user created');
-
-    // Create default settings
-    await Settings.create({
-      system: {
-        appName: 'OnLink',
-        appDescription: 'Professional URL shortening service',
-        appUrl: process.env.NEXTAUTH_URL || 'http://localhost:3000',
-        supportEmail: 'support@onlink.local',
-        smtp: {
-          host: '',
-          port: 587,
-          secure: false,
-          username: '',
-          password: '',
-          fromName: 'OnLink',
-          fromEmail: 'noreply@onlink.local'
-        },
-        security: {
-          enforceSSL: false, // Development mode
-          maxLoginAttempts: 5,
-          lockoutDuration: 15,
-          sessionTimeout: 24,
-          passwordMinLength: 8,
-          requireMFA: false
-        },
-        analytics: {
-          provider: 'internal',
-          trackingCode: '',
-          enableCustomAnalytics: true,
-          retentionDays: 365
-        },
-        integrations: {
-          stripe: { enabled: false },
-          google: { enabled: false },
-          facebook: { enabled: false }
-        }
-      },
-      defaultLimits: {
-        free: {
-          linksPerMonth: 5,
-          clicksPerMonth: 1000,
-          customDomains: 0,
-          analytics: false
-        },
-        premium: {
-          linksPerMonth: -1,
-          clicksPerMonth: -1,
-          customDomains: 3,
-          analytics: true
-        },
-        enterprise: {
-          linksPerMonth: -1,
-          clicksPerMonth: -1,
-          customDomains: -1,
-          analytics: true
-        }
-      },
-      features: {
-        enableSignup: true,
-        enableTeams: true,
-        enableCustomDomains: true,
-        enableQRCodes: true,
-        enableBulkOperations: true,
-        enableAPIAccess: true,
-        enableWhiteLabel: false,
-        maintenanceMode: false
-      },
-      lastModifiedBy: adminUser._id
-    });
-
-    console.log('✅ Default settings created');
-
-    // Create default system domain
-    await Domain.create({
-      domain: 'localhost:3000',
-      type: 'system',
-      isCustom: false,
-      isVerified: true,
-      isActive: true,
-      sslEnabled: false,
-      settings: {
-        redirectType: 301,
-        forceHttps: false, // Development mode
-        enableCompression: true,
-        cacheControl: 'public, max-age=3600',
-        branding: {},
-        security: {
-          enableCaptcha: false,
-          ipWhitelist: [],
-          ipBlacklist: [],
-          rateLimiting: {
-            enabled: true,
-            requestsPerMinute: 60
+    // Check if default domain exists
+    const existingDomain = await Domain.findOne({ domain: 'localhost:3000' });
+    if (existingDomain) {
+      console.log('ℹ️  Default domain already exists, skipping domain creation...');
+    } else {
+      // Create default system domain
+      await Domain.create({
+        domain: 'localhost:3000',
+        type: 'system',
+        isCustom: false,
+        isVerified: true,
+        isActive: true,
+        sslEnabled: false,
+        settings: {
+          redirectType: 301,
+          forceHttps: false, // Development mode
+          enableCompression: true,
+          cacheControl: 'public, max-age=3600',
+          branding: {},
+          security: {
+            enableCaptcha: false,
+            ipWhitelist: [],
+            ipBlacklist: [],
+            rateLimiting: {
+              enabled: true,
+              requestsPerMinute: 60
+            }
           }
+        },
+        usage: {
+          linksCount: 0,
+          clicksCount: 0,
+          bandwidthUsed: 0,
+          lastUpdated: new Date()
         }
-      },
-      usage: {
-        linksCount: 0,
-        clicksCount: 0,
-        bandwidthUsed: 0,
-        lastUpdated: new Date()
-      }
-    });
+      });
 
-    console.log('✅ Default domain created');
+      console.log('✅ Default domain created');
+    }
+    
     console.log('🎉 Default data seeded successfully!');
-    console.log('📧 Admin credentials: admin@onlink.local / admin123');
     
   } catch (error) {
     console.error('❌ Error seeding default data:', error);
@@ -261,10 +364,13 @@ async function migrate() {
     // Create indexes
     await createIndexes();
     
-    // Seed default data
+    // Seed default data (includes admin user fix)
     await seedDefaultData();
     
     console.log('🎉 Database migration completed successfully!');
+    console.log('📧 Use these credentials to login:');
+    console.log('   Email: admin@onlink.local');
+    console.log('   Password: admin123');
     
   } catch (error) {
     console.error('❌ Migration failed:', error);
@@ -280,4 +386,4 @@ if (require.main === module) {
   migrate();
 }
 
-export { migrate, createIndexes, seedDefaultData };
+export { migrate, createIndexes, seedDefaultData, createOrFixAdminUser };

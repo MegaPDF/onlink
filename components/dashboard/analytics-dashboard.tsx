@@ -52,11 +52,13 @@ const COLORS = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"];
 interface AnalyticsDashboardProps {
   shortCode?: string;
   showUrlSelector?: boolean;
+  
 }
 
 export function AnalyticsDashboard({
   shortCode,
   showUrlSelector = true,
+  
 }: AnalyticsDashboardProps) {
   const { user } = useAuth();
   const { data, metrics, isLoading, setDateRange, exportAnalytics } =

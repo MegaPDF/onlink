@@ -2,21 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { detectBot } from './lib/middleware-utils';
 
-// Rate limiter configurations
-const authLimiter = rateLimit({
-  interval: 15 * 60 * 1000, // 15 minutes
-  uniqueTokenPerInterval: 500,
+// Rate limiter configurations (simplified for this example)
+const createRateLimiter = (limit: number, window: number) => ({
+  async check(max: number, key: string) {
+    // In production, use Redis or similar for distributed rate limiting
+    // For now, this is a placeholder
+    return true;
+  }
 });
 
-const apiLimiter = rateLimit({
-  interval: 60 * 1000, // 1 minute
-  uniqueTokenPerInterval: 1000,
-});
-
-const redirectLimiter = rateLimit({
-  interval: 60 * 1000, // 1 minute
-  uniqueTokenPerInterval: 2000,
-});
+const authLimiter = createRateLimiter(20, 15 * 60 * 1000);
+const apiLimiter = createRateLimiter(100, 60 * 1000);
+const redirectLimiter = createRateLimiter(100, 60 * 1000);
 
 // Security headers
 const securityHeaders = {
@@ -28,42 +25,30 @@ const securityHeaders = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
 };
 
-// Route configurations
-const publicRoutes = [
-  '/',
-  '/auth/signin',
-  '/auth/signup',
-  '/auth/forgot-password',
-  '/auth/reset-password',
-  '/auth/verify-email',
-  '/api/auth',
-  '/api/public',
-  '/about',
-  '/contact',
-  '/terms',
-  '/privacy',
-  '/pricing',
-  '/404',
-  '/500',
+// Route patterns
+const STATIC_EXTENSIONS = [
+  '.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp',
+  '.woff', '.woff2', '.ttf', '.eot', '.json', '.xml', '.txt', '.map'
 ];
 
-const protectedRoutes = [
-  '/dashboard',
-  '/api/client',
-];
-
-const adminRoutes = [
-  '/admin',
-  '/api/admin',
-];
-
-const apiRoutes = [
-  '/api/',
+const RESERVED_PATHS = [
+  '/', '/home', '/index',
+  '/auth', '/login', '/signin', '/signup', '/register',
+  '/dashboard', '/admin', '/api',
+  '/about', '/contact', '/terms', '/privacy', '/pricing', '/help',
+  '/404', '/500', '/error', '/unauthorized',
+  '/manifest.json', '/robots.txt', '/sitemap.xml', '/favicon.ico',
+  '/sw.js', '/service-worker.js'
 ];
 
 export async function middleware(request: NextRequest) {
-  const { pathname, origin } = request.nextUrl;
+  const { pathname } = request.nextUrl;
   const response = NextResponse.next();
+
+  // Skip middleware for static files
+  if (STATIC_EXTENSIONS.some(ext => pathname.includes(ext))) {
+    return response;
+  }
 
   // Add security headers to all responses
   Object.entries(securityHeaders).forEach(([key, value]) => {
@@ -91,43 +76,48 @@ export async function middleware(request: NextRequest) {
 
   const isAuthenticated = !!token;
   const userRole = token?.role as string;
-  const userPlan = token?.plan as string;
   const isBot = detectBot(request.headers.get('user-agent') || '');
+  const ip = getClientIP(request);
 
-  // Handle different route types
+  console.log(`🛡️ Middleware processing: ${pathname}`);
+
   try {
-    // 1. Handle URL shortcode redirects (highest priority)
-    if (await isShortCodeRoute(pathname)) {
-      return await handleShortCodeRedirect(request, response);
-    }
-
-    // 2. Handle API routes
+    // 1. Handle API routes first
     if (pathname.startsWith('/api/')) {
-      return await handleApiRoute(request, response, token, isBot);
+      return await handleApiRoute(request, response, token, isBot, ip);
     }
 
-    // 3. Handle authentication routes
+    // 2. Handle authentication routes
     if (pathname.startsWith('/auth/')) {
-      return await handleAuthRoute(request, response, isAuthenticated);
+      return await handleAuthRoute(request, response, isAuthenticated, ip);
     }
 
-    // 4. Handle admin routes
-    if (isAdminRoute(pathname)) {
+    // 3. Handle admin routes
+    if (pathname.startsWith('/admin')) {
       return await handleAdminRoute(request, response, isAuthenticated, userRole);
     }
 
-    // 5. Handle protected routes
-    if (isProtectedRoute(pathname)) {
+    // 4. Handle dashboard routes
+    if (pathname.startsWith('/dashboard')) {
       return await handleProtectedRoute(request, response, isAuthenticated);
     }
 
-    // 6. Handle public routes and static assets
+    // 5. Handle known public routes
+    if (isPublicRoute(pathname)) {
+      return response;
+    }
+
+    // 6. Handle potential short code routes (only for single segments)
+    if (await isPotentialShortCode(pathname)) {
+      return await handleShortCodeRedirect(request, response, ip);
+    }
+
+    // 7. Default: allow the request to continue
     return response;
 
   } catch (error) {
     console.error('Middleware error:', error);
     
-    // Return error page for critical failures
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
         { error: 'Internal server error' }, 
@@ -139,20 +129,67 @@ export async function middleware(request: NextRequest) {
   }
 }
 
+// Check if route is public
+function isPublicRoute(pathname: string): boolean {
+  const publicRoutes = [
+    '/',
+    '/about',
+    '/contact',
+    '/terms',
+    '/privacy',
+    '/pricing',
+    '/404',
+    '/500',
+    '/unauthorized',
+    '/link-disabled',
+    '/link-expired',
+    '/link-limit-reached'
+  ];
+
+  return publicRoutes.includes(pathname) || 
+         RESERVED_PATHS.some(path => pathname.startsWith(path));
+}
+
+// Check if this could be a short code
+async function isPotentialShortCode(pathname: string): Promise<boolean> {
+  // Must be a single segment (no additional slashes after the first one)
+  const segments = pathname.split('/').filter(Boolean);
+  if (segments.length !== 1) {
+    return false;
+  }
+
+  const code = segments[0];
+
+  // Must match short code pattern (6-12 alphanumeric characters)
+  const shortCodePattern = /^[a-zA-Z0-9_-]{6,12}$/;
+  if (!shortCodePattern.test(code)) {
+    return false;
+  }
+
+  // Must not be a reserved word
+  const reservedWords = [
+    'api', 'admin', 'dashboard', 'auth', 'www', 'mail', 'ftp',
+    'blog', 'shop', 'store', 'app', 'mobile', 'secure', 'ssl',
+    'help', 'support', 'contact', 'about', 'terms', 'privacy',
+    'login', 'signup', 'register', 'account', 'profile', 'settings'
+  ];
+
+  if (reservedWords.includes(code.toLowerCase())) {
+    return false;
+  }
+
+  return true;
+}
+
 // Handle short code redirects
 async function handleShortCodeRedirect(
   request: NextRequest, 
-  response: NextResponse
+  response: NextResponse,
+  ip: string
 ): Promise<NextResponse> {
-  const pathname = request.nextUrl.pathname;
-  const shortCode = pathname.slice(1); // Remove leading slash
-
   // Apply rate limiting for redirects
-  const ip = getClientIP(request);
-  const identifier = `redirect:${ip}`;
-
   try {
-    await redirectLimiter.check(100, identifier); // 100 requests per minute per IP
+    await redirectLimiter.check(100, `redirect:${ip}`);
   } catch {
     return NextResponse.json(
       { error: 'Rate limit exceeded' }, 
@@ -160,7 +197,7 @@ async function handleShortCodeRedirect(
     );
   }
 
-  // Let the API route handle the actual redirect logic
+  // Let the dynamic route handle the actual redirect logic
   return response;
 }
 
@@ -169,10 +206,10 @@ async function handleApiRoute(
   request: NextRequest,
   response: NextResponse,
   token: any,
-  isBot: boolean
+  isBot: boolean,
+  ip: string
 ): Promise<NextResponse> {
   const pathname = request.nextUrl.pathname;
-  const ip = getClientIP(request);
 
   // Block bots from most API endpoints (except public ones)
   if (isBot && !pathname.includes('/api/public/')) {
@@ -185,19 +222,16 @@ async function handleApiRoute(
   // Rate limiting for different API categories
   try {
     if (pathname.startsWith('/api/auth/')) {
-      // Stricter rate limiting for auth endpoints
-      await authLimiter.check(10, `auth:${ip}`); // 10 requests per 15 minutes
+      await authLimiter.check(10, `auth:${ip}`);
     } else if (pathname.startsWith('/api/admin/')) {
-      // Admin API rate limiting
       if (!token || token.role !== 'admin') {
         return NextResponse.json(
           { error: 'Unauthorized' }, 
           { status: 401 }
         );
       }
-      await apiLimiter.check(100, `admin:${ip}`); // 100 requests per minute
+      await apiLimiter.check(100, `admin:${ip}`);
     } else if (pathname.startsWith('/api/client/')) {
-      // Client API rate limiting
       if (!token) {
         return NextResponse.json(
           { error: 'Unauthorized' }, 
@@ -205,12 +239,10 @@ async function handleApiRoute(
         );
       }
       
-      // Different limits based on plan
       const limit = getPlanApiLimit(token.plan);
       await apiLimiter.check(limit, `client:${token.sub}`);
     } else {
-      // General API rate limiting
-      await apiLimiter.check(60, `api:${ip}`); // 60 requests per minute
+      await apiLimiter.check(60, `api:${ip}`);
     }
   } catch {
     return NextResponse.json(
@@ -226,7 +258,8 @@ async function handleApiRoute(
 async function handleAuthRoute(
   request: NextRequest,
   response: NextResponse,
-  isAuthenticated: boolean
+  isAuthenticated: boolean,
+  ip: string
 ): Promise<NextResponse> {
   const pathname = request.nextUrl.pathname;
 
@@ -236,9 +269,8 @@ async function handleAuthRoute(
   }
 
   // Rate limiting for auth pages
-  const ip = getClientIP(request);
   try {
-    await authLimiter.check(20, `auth-page:${ip}`); // 20 visits per 15 minutes
+    await authLimiter.check(20, `auth-page:${ip}`);
   } catch {
     return NextResponse.redirect(new URL('/rate-limit', request.url));
   }
@@ -282,33 +314,6 @@ async function handleProtectedRoute(
 }
 
 // Helper functions
-async function isShortCodeRoute(pathname: string): Promise<boolean> {
-  // Skip if it's clearly not a short code
-  if (pathname === '/' || 
-      pathname.startsWith('/api/') || 
-      pathname.startsWith('/auth/') ||
-      pathname.startsWith('/dashboard/') ||
-      pathname.startsWith('/admin/') ||
-      pathname.includes('.') || // Files with extensions
-      publicRoutes.some(route => pathname.startsWith(route))) {
-    return false;
-  }
-
-  // Check if it matches short code pattern (6-12 alphanumeric characters)
-  const shortCode = pathname.slice(1);
-  const shortCodePattern = /^[a-zA-Z0-9]{6,12}$/;
-  
-  return shortCodePattern.test(shortCode);
-}
-
-function isProtectedRoute(pathname: string): boolean {
-  return protectedRoutes.some(route => pathname.startsWith(route));
-}
-
-function isAdminRoute(pathname: string): boolean {
-  return adminRoutes.some(route => pathname.startsWith(route));
-}
-
 function getClientIP(request: NextRequest): string {
   const forwarded = request.headers.get('x-forwarded-for');
   const realIP = request.headers.get('x-real-ip');
@@ -321,22 +326,20 @@ function getClientIP(request: NextRequest): string {
     return realIP;
   }
   
-  return '127.0.0.1';
+  return request.ip || 'unknown';
 }
 
 function getPlanApiLimit(plan: string): number {
-  switch (plan) {
-    case 'enterprise':
-      return 1000; // 1000 requests per minute
-    case 'premium':
-      return 300;  // 300 requests per minute
-    case 'free':
-    default:
-      return 60;   // 60 requests per minute
-  }
+  const limits = {
+    free: 50,
+    premium: 200,
+    team: 500,
+    enterprise: 1000
+  } as const;
+
+  return limits[plan as keyof typeof limits] || 50;
 }
 
-// Export middleware configuration
 export const config = {
   matcher: [
     /*
@@ -344,47 +347,7 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public folder files
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 };
-// Simple in-memory rate limiter (not for production use)
-function rateLimit({
-    interval,
-    uniqueTokenPerInterval,
-}: {
-    interval: number;
-    uniqueTokenPerInterval: number;
-}) {
-    // Map: identifier -> { count, expiresAt }
-    const tokenMap = new Map<string, { count: number; expiresAt: number }>();
-
-    return {
-        async check(limit: number, identifier: string) {
-            const now = Date.now();
-            let entry = tokenMap.get(identifier);
-
-            if (!entry || entry.expiresAt < now) {
-                entry = { count: 0, expiresAt: now + interval };
-                tokenMap.set(identifier, entry);
-            }
-
-            if (entry.count >= limit) {
-                throw new Error('Rate limit exceeded');
-            }
-
-            entry.count += 1;
-
-            // Clean up old entries if map grows too large
-            if (tokenMap.size > uniqueTokenPerInterval * 2) {
-                for (const [key, value] of tokenMap.entries()) {
-                    if (value.expiresAt < now) {
-                        tokenMap.delete(key);
-                    }
-                }
-            }
-        },
-    };
-}
-

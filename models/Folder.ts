@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+
 export interface IFolder extends Document {
   _id: string;
   name: string;
@@ -6,16 +7,13 @@ export interface IFolder extends Document {
   color?: string;
   icon?: string;
   
-  // Ownership
   userId: mongoose.Types.ObjectId;
   teamId?: mongoose.Types.ObjectId;
   
-  // Hierarchy
   parentId?: mongoose.Types.ObjectId;
-  path: string; // For efficient querying of nested folders
-  level: number; // Depth level (0 = root)
+  path: string;
+  level: number;
   
-  // Sharing and permissions
   isShared: boolean;
   shareSettings?: {
     type: 'public' | 'team' | 'private';
@@ -31,14 +29,12 @@ export interface IFolder extends Document {
     }[];
   };
   
-  // Statistics (synced with URL model)
   stats: {
     urlCount: number;
     totalClicks: number;
     lastUpdated: Date;
   };
   
-  // Timestamps and status
   createdAt: Date;
   updatedAt: Date;
   isDeleted: boolean;
@@ -70,31 +66,26 @@ const FolderSchema = new Schema<IFolder>({
   userId: { 
     type: Schema.Types.ObjectId, 
     ref: 'User', 
-    required: true,
-    index: true
+    required: true
   },
   teamId: { 
     type: Schema.Types.ObjectId, 
-    ref: 'Team',
-    index: true
+    ref: 'Team'
   },
   
   parentId: { 
     type: Schema.Types.ObjectId, 
-    ref: 'Folder',
-    index: true
+    ref: 'Folder'
   },
   path: { 
     type: String, 
-    required: true,
-    index: true
+    required: true
   },
   level: { 
     type: Number, 
     required: true, 
     min: 0, 
-    max: 10,
-    index: true
+    max: 10
   },
   
   isShared: { type: Boolean, default: false },
@@ -118,13 +109,13 @@ const FolderSchema = new Schema<IFolder>({
     lastUpdated: { type: Date, default: Date.now }
   },
   
-  isDeleted: { type: Boolean, default: false, index: true },
+  isDeleted: { type: Boolean, default: false },
   deletedAt: { type: Date }
 }, {
   timestamps: true
 });
 
-// Indexes
+// Clean indexes
 FolderSchema.index({ userId: 1, isDeleted: 1 });
 FolderSchema.index({ teamId: 1, isDeleted: 1 });
 FolderSchema.index({ parentId: 1, isDeleted: 1 });

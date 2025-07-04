@@ -1,4 +1,4 @@
-import mongoose, { Schema } from "mongoose";
+import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITeam extends Document {
   _id: string;
@@ -95,18 +95,15 @@ const TeamSchema = new Schema<ITeam>({
   slug: { 
     type: String, 
     required: true, 
-    unique: true,
     lowercase: true,
-    match: /^[a-z0-9-]+$/,
-    index: true
+    match: /^[a-z0-9-]+$/
   },
   logo: { type: String },
   
   ownerId: { 
     type: Schema.Types.ObjectId, 
     ref: 'User', 
-    required: true,
-    index: true
+    required: true
   },
   
   members: [{
@@ -136,13 +133,12 @@ const TeamSchema = new Schema<ITeam>({
   plan: { 
     type: String, 
     enum: ['team', 'enterprise'], 
-    default: 'team',
-    index: true
+    default: 'team'
   },
   
   billing: {
-    stripeCustomerId: { type: String, index: true },
-    stripeSubscriptionId: { type: String, index: true },
+    stripeCustomerId: { type: String },
+    stripeSubscriptionId: { type: String },
     stripePriceId: { type: String },
     billingEmail: { type: String, required: true },
     billingAddress: {
@@ -187,17 +183,18 @@ const TeamSchema = new Schema<ITeam>({
     customDomains: { type: Number, default: 3 }
   },
   
-  isActive: { type: Boolean, default: true, index: true },
-  isDeleted: { type: Boolean, default: false, index: true },
+  isActive: { type: Boolean, default: true },
+  isDeleted: { type: Boolean, default: false },
   deletedAt: { type: Date }
 }, {
   timestamps: true
 });
 
-// Indexes
+// Clean indexes
+TeamSchema.index({ slug: 1 }, { unique: true });
 TeamSchema.index({ ownerId: 1 });
 TeamSchema.index({ 'members.userId': 1 });
 TeamSchema.index({ plan: 1, isActive: 1 });
-TeamSchema.index({ slug: 1 }, { unique: true });
+TeamSchema.index({ isDeleted: 1 });
 
-export const Team = mongoose.models.Team || mongoose.model('Team', TeamSchema);
+export const Team = mongoose.models.Team || mongoose.model<ITeam>('Team', TeamSchema);

@@ -1,3 +1,4 @@
+// ============= Updated components/layout/Sidebar.tsx =============
 "use client";
 
 import React from "react";
@@ -27,6 +28,13 @@ import {
   Target,
   Zap,
   TrendingUp,
+  FileText,
+  Database,
+  Mail,
+  Key,
+  Monitor,
+  Activity,
+  AlertTriangle,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -137,17 +145,94 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
     },
   ];
 
+  // Enhanced admin navigation with all required routes
   const adminNavigation: NavItem[] = [
     {
-      title: "Admin Panel",
+      title: "Admin Overview",
       href: "/admin",
+      icon: LayoutDashboard,
+      adminOnly: true,
+    },
+    {
+      title: "Users",
+      href: "/admin/users",
+      icon: Users,
+      adminOnly: true,
+    },
+    {
+      title: "Links",
+      href: "/admin/links",
+      icon: LinkIcon,
+      adminOnly: true,
+    },
+    {
+      title: "Domains",
+      href: "/admin/domains",
+      icon: Globe,
+      adminOnly: true,
+    },
+    {
+      title: "Billing",
+      href: "/admin/billing",
+      icon: CreditCard,
+      adminOnly: true,
+    },
+    {
+      title: "Security",
+      href: "/admin/security",
       icon: Shield,
+      adminOnly: true,
+    },
+    {
+      title: "Reports",
+      href: "/admin/reports",
+      icon: FileText,
       adminOnly: true,
     },
     {
       title: "System Settings",
       href: "/admin/settings",
       icon: Target,
+      adminOnly: true,
+    },
+  ];
+
+  // Admin quick actions
+  const adminQuickActions: NavItem[] = [
+    {
+      title: "Analytics",
+      href: "/admin/analytics",
+      icon: BarChart3,
+      adminOnly: true,
+    },
+    {
+      title: "Database",
+      href: "/admin/database",
+      icon: Database,
+      adminOnly: true,
+    },
+    {
+      title: "Email Config",
+      href: "/admin/email",
+      icon: Mail,
+      adminOnly: true,
+    },
+    {
+      title: "API Keys",
+      href: "/admin/api-keys",
+      icon: Key,
+      adminOnly: true,
+    },
+    {
+      title: "System Health",
+      href: "/admin/health",
+      icon: Monitor,
+      adminOnly: true,
+    },
+    {
+      title: "Audit Logs",
+      href: "/admin/audit",
+      icon: Activity,
       adminOnly: true,
     },
   ];
@@ -162,6 +247,9 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
   const isActive = (href: string) => {
     if (href === "/dashboard") {
       return pathname === "/dashboard";
+    }
+    if (href === "/admin") {
+      return pathname === "/admin";
     }
     return pathname.startsWith(href);
   };
@@ -204,6 +292,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
   return (
     <div className={cn("pb-12 min-h-screen", className)}>
       <div className="space-y-4 py-4">
+        {/* Regular Navigation */}
         <div className="px-3 py-2">
           <div className="space-y-1">
             <h2 className="mb-2 px-4 text-lg font-semibold tracking-tight">
@@ -213,6 +302,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
           </div>
         </div>
 
+        {/* Team Navigation */}
         {user?.team && (
           <>
             <Separator />
@@ -227,6 +317,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
           </>
         )}
 
+        {/* Account Settings */}
         <Separator />
         <div className="px-3 py-2">
           <div className="space-y-1">
@@ -237,6 +328,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
           </div>
         </div>
 
+        {/* Admin Navigation */}
         {user?.role === "admin" && (
           <>
             <Separator />
@@ -246,6 +338,33 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
                   Administration
                 </h2>
                 {adminNavigation.map(renderNavItem)}
+              </div>
+            </div>
+
+            {/* Admin Quick Actions */}
+            <div className="px-3 py-2">
+              <div className="space-y-1">
+                <h2 className="mb-2 px-4 text-sm font-semibold tracking-tight text-muted-foreground">
+                  Quick Actions
+                </h2>
+                {adminQuickActions.map(renderNavItem)}
+              </div>
+            </div>
+
+            {/* Admin Warning */}
+            <div className="px-3 py-2">
+              <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs">
+                    <div className="font-medium text-amber-600 dark:text-amber-400 mb-1">
+                      Administrator Access
+                    </div>
+                    <div className="text-amber-700 dark:text-amber-300">
+                      You have full system access. Use with caution.
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </>

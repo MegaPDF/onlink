@@ -1,4 +1,3 @@
-// models/Domain.ts - FIXED VERSION
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IDomain extends Document {
@@ -38,7 +37,7 @@ export interface IDomain extends Document {
     forceHttps: boolean;
     enableCompression: boolean;
     cacheControl: string;
-    branding: {
+    branding?: {
       logo?: string;
       favicon?: string;
       customCss?: string;
@@ -64,23 +63,21 @@ export interface IDomain extends Document {
     lastUpdated: Date;
   };
   
-  createdAt: Date;
-  updatedAt: Date;
   lastUsedAt?: Date;
   isDeleted: boolean;
   deletedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const DomainSchema = new Schema<IDomain>({
   domain: { 
     type: String, 
     required: true, 
-    unique: true,
     lowercase: true,
     trim: true,
     validate: {
       validator: function(v: string) {
-        // Allow localhost with port for development, or standard domains
         return /^(localhost:\d+|[a-z0-9.-]+\.[a-z]{2,})$/i.test(v);
       },
       message: 'Invalid domain format'
@@ -92,14 +89,8 @@ const DomainSchema = new Schema<IDomain>({
     trim: true
   },
   
-  userId: { 
-    type: Schema.Types.ObjectId, 
-    ref: 'User'
-  },
-  teamId: { 
-    type: Schema.Types.ObjectId, 
-    ref: 'Team'
-  },
+  userId: { type: Schema.Types.ObjectId, ref: 'User' },
+  teamId: { type: Schema.Types.ObjectId, ref: 'Team' },
   
   type: { 
     type: String, 
@@ -175,7 +166,7 @@ const DomainSchema = new Schema<IDomain>({
   timestamps: true
 });
 
-// Single index definitions (remove duplicates)
+// Clean indexes - no duplicates
 DomainSchema.index({ domain: 1 }, { unique: true });
 DomainSchema.index({ userId: 1, isDeleted: 1 });
 DomainSchema.index({ teamId: 1, isDeleted: 1 });

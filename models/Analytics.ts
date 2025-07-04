@@ -58,22 +58,32 @@ export interface IAnalytics extends Document {
 }
 
 const AnalyticsSchema = new Schema<IAnalytics>({
-  urlId: { type: Schema.Types.ObjectId, ref: 'URL', required: true, index: true },
-  shortCode: { type: String, required: true, index: true },
+  urlId: { 
+    type: Schema.Types.ObjectId, 
+    ref: 'URL', 
+    required: true
+  },
+  shortCode: { 
+    type: String, 
+    required: true
+  },
   
-  timestamp: { type: Date, default: Date.now, index: true },
+  timestamp: { 
+    type: Date, 
+    default: Date.now
+  },
   
   visitor: {
     ip: { type: String, required: true },
-    hashedIp: { type: String, required: true, index: true },
+    hashedIp: { type: String, required: true },
     userAgent: { type: String, required: true },
     acceptLanguage: { type: String },
-    sessionId: { type: String, index: true }
+    sessionId: { type: String }
   },
   
   location: {
-    country: { type: String, index: true },
-    countryCode: { type: String, index: true },
+    country: { type: String },
+    countryCode: { type: String },
     region: { type: String },
     city: { type: String },
     latitude: { type: Number },
@@ -82,10 +92,14 @@ const AnalyticsSchema = new Schema<IAnalytics>({
   },
   
   device: {
-    type: { type: String, enum: ['desktop', 'mobile', 'tablet', 'bot'], required: true, index: true },
-    os: { type: String, required: true, index: true },
+    type: { 
+      type: String, 
+      enum: ['desktop', 'mobile', 'tablet', 'bot'], 
+      required: true
+    },
+    os: { type: String, required: true },
     osVersion: { type: String },
-    browser: { type: String, required: true, index: true },
+    browser: { type: String, required: true },
     browserVersion: { type: String },
     viewport: {
       width: { type: Number },
@@ -95,8 +109,12 @@ const AnalyticsSchema = new Schema<IAnalytics>({
   
   referrer: {
     url: { type: String },
-    domain: { type: String, index: true },
-    type: { type: String, enum: ['direct', 'search', 'social', 'email', 'ads', 'referral', 'unknown'], required: true, index: true },
+    domain: { type: String },
+    type: { 
+      type: String, 
+      enum: ['direct', 'search', 'social', 'email', 'ads', 'referral', 'unknown'], 
+      required: true
+    },
     utm: {
       source: { type: String },
       medium: { type: String },
@@ -107,17 +125,22 @@ const AnalyticsSchema = new Schema<IAnalytics>({
   },
   
   bot: {
-    isBot: { type: Boolean, default: false, index: true },
+    isBot: { type: Boolean, default: false },
     botName: { type: String },
-    botType: { type: String, enum: ['search', 'social', 'monitoring', 'security', 'unknown'] }
+    botType: { 
+      type: String, 
+      enum: ['search', 'social', 'monitoring', 'security', 'unknown'] 
+    }
   }
 }, {
-  timestamps: false // We use our own timestamp field
+  timestamps: false, // We use our own timestamp field
+  collection: 'analytics'
 });
 
-// Indexes
-AnalyticsSchema.index({ urlId: 1, timestamp: 1 });
-AnalyticsSchema.index({ timestamp: 1 });
+// Clean indexes for analytics
+AnalyticsSchema.index({ urlId: 1, timestamp: -1 });
+AnalyticsSchema.index({ timestamp: -1 });
+AnalyticsSchema.index({ 'visitor.hashedIp': 1 });
 AnalyticsSchema.index({ 'location.country': 1 });
 AnalyticsSchema.index({ 'device.type': 1 });
 AnalyticsSchema.index({ 'referrer.type': 1 });

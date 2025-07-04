@@ -1,26 +1,23 @@
 import mongoose, { Schema, Document } from 'mongoose';
+
 export interface IURL extends Document {
   _id: string;
   originalUrl: string;
   shortCode: string;
   customSlug?: string;
   
-  // Ownership and organization
   userId: mongoose.Types.ObjectId;
   teamId?: mongoose.Types.ObjectId;
   folderId?: mongoose.Types.ObjectId;
   
-  // Metadata
   title?: string;
   description?: string;
   tags: string[];
   favicon?: string;
   
-  // Domain and branding
   domain: string;
   customDomain?: string;
   
-  // QR Code
   qrCode?: {
     url: string;
     downloadUrl?: string;
@@ -32,13 +29,11 @@ export interface IURL extends Document {
     };
   };
   
-  // Access control
   isActive: boolean;
   isPublic: boolean;
   isPasswordProtected: boolean;
   password?: string;
   
-  // Restrictions and limits
   expiresAt?: Date;
   clickLimit?: number;
   geoRestrictions?: {
@@ -53,13 +48,12 @@ export interface IURL extends Document {
   timeRestrictions?: {
     enabled: boolean;
     schedule: {
-      day: number; // 0-6 (Sunday-Saturday)
-      startTime: string; // HH:MM
-      endTime: string; // HH:MM
+      day: number;
+      startTime: string;
+      endTime: string;
     }[];
   };
   
-  // UTM and tracking
   utmParameters?: {
     source?: string;
     medium?: string;
@@ -68,7 +62,6 @@ export interface IURL extends Document {
     content?: string;
   };
   
-  // Click statistics (synced with Analytics model)
   clicks: {
     total: number;
     unique: number;
@@ -78,7 +71,6 @@ export interface IURL extends Document {
     lastUpdated: Date;
   };
   
-  // Quick analytics cache (synced from Analytics model)
   analyticsCache: {
     topCountries: { country: string; count: number }[];
     topReferrers: { referrer: string; count: number }[];
@@ -86,7 +78,6 @@ export interface IURL extends Document {
     lastSyncAt: Date;
   };
   
-  // Status and timestamps
   createdAt: Date;
   updatedAt: Date;
   lastClickAt?: Date;
@@ -98,81 +89,67 @@ const URLSchema = new Schema<IURL>({
   originalUrl: { 
     type: String, 
     required: true,
+    trim: true,
     maxlength: 2048
   },
   shortCode: { 
     type: String, 
     required: true, 
-    unique: true,
-    index: true,
+    match: /^[a-zA-Z0-9_-]+$/,
     maxlength: 20
   },
   customSlug: { 
-    type: String, 
-    unique: true, 
-    sparse: true,
+    type: String,
+    match: /^[a-zA-Z0-9_-]+$/,
     maxlength: 50
   },
   
   userId: { 
     type: Schema.Types.ObjectId, 
     ref: 'User', 
-    required: true,
-    index: true
+    required: true
   },
-  teamId: { 
-    type: Schema.Types.ObjectId, 
-    ref: 'Team',
-    index: true
-  },
-  folderId: { 
-    type: Schema.Types.ObjectId, 
-    ref: 'Folder',
-    index: true
-  },
+  teamId: { type: Schema.Types.ObjectId, ref: 'Team' },
+  folderId: { type: Schema.Types.ObjectId, ref: 'Folder' },
   
   title: { 
-    type: String, 
-    maxlength: 200,
-    trim: true
+    type: String,
+    trim: true,
+    maxlength: 200
   },
   description: { 
-    type: String, 
-    maxlength: 500,
-    trim: true
+    type: String,
+    trim: true,
+    maxlength: 500
   },
   tags: [{ 
-    type: String, 
-    maxlength: 50,
-    trim: true
+    type: String,
+    trim: true,
+    maxlength: 50
   }],
   favicon: { type: String },
   
-  domain: { 
-    type: String, 
-    required: true,
-    index: true
-  },
+  domain: { type: String, required: true },
   customDomain: { type: String },
   
   qrCode: {
     url: { type: String },
     downloadUrl: { type: String },
     style: {
-      size: { type: Number, default: 200 },
+      size: { type: Number, default: 200, min: 100, max: 1000 },
       color: { type: String, default: '#000000' },
       backgroundColor: { type: String, default: '#FFFFFF' },
       logo: { type: String }
     }
   },
   
-  isActive: { type: Boolean, default: true, index: true },
+  isActive: { type: Boolean, default: true },
   isPublic: { type: Boolean, default: true },
   isPasswordProtected: { type: Boolean, default: false },
-  password: { type: String },
+  password: { type: String, select: false },
   
-  expiresAt: { type: Date, index: true },
-  clickLimit: { type: Number, min: 0 },
+  expiresAt: { type: Date },
+  clickLimit: { type: Number, min: 1 },
   geoRestrictions: {
     type: { type: String, enum: ['allow', 'block'] },
     countries: [{ type: String, length: 2 }] // ISO country codes
@@ -186,17 +163,17 @@ const URLSchema = new Schema<IURL>({
     enabled: { type: Boolean, default: false },
     schedule: [{
       day: { type: Number, min: 0, max: 6 },
-      startTime: { type: String },
-      endTime: { type: String }
+      startTime: { type: String, match: /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/ },
+      endTime: { type: String, match: /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/ }
     }]
   },
   
   utmParameters: {
-    source: { type: String, maxlength: 100 },
-    medium: { type: String, maxlength: 100 },
-    campaign: { type: String, maxlength: 100 },
-    term: { type: String, maxlength: 100 },
-    content: { type: String, maxlength: 100 }
+    source: { type: String, trim: true },
+    medium: { type: String, trim: true },
+    campaign: { type: String, trim: true },
+    term: { type: String, trim: true },
+    content: { type: String, trim: true }
   },
   
   clicks: {
@@ -225,7 +202,7 @@ const URLSchema = new Schema<IURL>({
   },
   
   lastClickAt: { type: Date },
-  isDeleted: { type: Boolean, default: false, index: true },
+  isDeleted: { type: Boolean, default: false },
   deletedAt: { type: Date }
 }, {
   timestamps: true,
@@ -233,19 +210,21 @@ const URLSchema = new Schema<IURL>({
   toObject: { virtuals: true }
 });
 
-// Compound indexes for performance
+// Indexes - Clean, no duplicates
+URLSchema.index({ shortCode: 1 }, { unique: true });
 URLSchema.index({ userId: 1, isDeleted: 1, isActive: 1 });
 URLSchema.index({ teamId: 1, isDeleted: 1 });
 URLSchema.index({ folderId: 1, isDeleted: 1 });
 URLSchema.index({ domain: 1, shortCode: 1 });
-URLSchema.index({ expiresAt: 1, isActive: 1 });
+URLSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 URLSchema.index({ createdAt: -1 });
 URLSchema.index({ tags: 1 });
+URLSchema.index({ 'clicks.total': -1 });
 
 // Virtual for full short URL
 URLSchema.virtual('shortUrl').get(function() {
   const baseUrl = this.customDomain || this.domain;
-  return `${baseUrl}/${this.customSlug || this.shortCode}`;
+  return `https://${baseUrl}/${this.customSlug || this.shortCode}`;
 });
 
 // Virtual for click rate

@@ -1,34 +1,50 @@
-// scripts/test-login.ts - Test the admin user login
+// ============= scripts/debug-auth.ts =============
 import mongoose from 'mongoose';
 import * as dotenv from 'dotenv';
 import * as bcrypt from 'bcryptjs';
 
+// Load environment variables
 dotenv.config({ path: '.env.local' });
 
-async function testAdminLogin() {
-  try {
-    await mongoose.connect(process.env.MONGODB_URI!);
-    console.log('✅ Connected to MongoDB');
+async function debugAuth() {
+  console.log('🔍 Starting authentication debug...\n');
 
-    // Dynamic import to avoid module issues
+  // 1. Check environment variables
+  console.log('📝 Environment Variables:');
+  console.log('- NEXTAUTH_SECRET:', !!process.env.NEXTAUTH_SECRET ? '✅ Set' : '❌ Missing');
+  console.log('- NEXTAUTH_URL:', process.env.NEXTAUTH_URL || '❌ Missing');
+  console.log('- MONGODB_URI:', !!process.env.MONGODB_URI ? '✅ Set' : '❌ Missing');
+  console.log('- NODE_ENV:', process.env.NODE_ENV || 'undefined');
+  console.log();
+
+  if (!process.env.MONGODB_URI) {
+    console.log('❌ MONGODB_URI is required. Please set it in .env.local');
+    return;
+  }
+
+  try {
+    // 2. Test database connection
+    console.log('🔌 Testing database connection...');
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log('✅ Database connected successfully\n');
+
+    // 3. Load models
     const { User } = await import('../models/User');
 
-    // Find the admin user
-    const adminUser = await User.findOne({ 
+    // 4. Check if admin user exists
+    console.log('👤 Checking admin user...');
+    let adminUser = await User.findOne({ 
       email: 'admin@onlink.local',
       isDeleted: false 
     });
 
     if (!adminUser) {
-      console.log('❌ Admin user not found');
+      console.log('📝 Creating admin user...');
       
-      // Create admin user with proper password hashing
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      
-      const newAdmin = await User.create({
+      adminUser = await User.create({
         name: 'System Admin',
         email: 'admin@onlink.local',
-        password: hashedPassword,
+        password: 'admin123', // This will be hashed by the pre-save middleware
         role: 'admin',
         plan: 'enterprise',
         isEmailVerified: true,
@@ -62,57 +78,58 @@ async function testAdminLogin() {
           ipWhitelist: []
         }
       });
-
-      console.log('✅ Admin user created:', newAdmin.email);
-      return;
+      
+      console.log('✅ Admin user created');
+    } else {
+      console.log('✅ Admin user exists');
     }
 
-    console.log('👤 Admin user found:', adminUser.email);
-    console.log('🔧 Role:', adminUser.role);
-    console.log('📦 Plan:', adminUser.plan);
-    console.log('✅ Active:', adminUser.isActive);
-    console.log('📧 Email verified:', adminUser.isEmailVerified);
-    console.log('🔐 Has password:', !!adminUser.password);
+    // 5. Test password comparison
+    console.log('\n🔐 Testing password comparison:');
+    console.log('- Email:', adminUser.email);
+    console.log('- Active:', adminUser.isActive);
+    console.log('- Email verified:', adminUser.isEmailVerified);
+    console.log('- Role:', adminUser.role);
+    console.log('- Has password:', !!adminUser.password);
+    console.log('- Login attempts:', adminUser.security.loginAttempts);
+    console.log('- Locked until:', adminUser.security.lockedUntil || 'Not locked');
 
-    // Test password comparison
     if (adminUser.password) {
       const testPassword = 'admin123';
-      const isValidDirect = await bcrypt.compare(testPassword, adminUser.password);
-      console.log('🔑 Direct bcrypt compare:', isValidDirect);
-
-      // Test the model method if it exists
+      
+      // Test direct bcrypt comparison
+      const directCompare = await bcrypt.compare(testPassword, adminUser.password);
+      console.log('- Direct bcrypt compare:', directCompare ? '✅ Valid' : '❌ Invalid');
+      
+      // Test model method comparison
       if (typeof adminUser.comparePassword === 'function') {
-        const isValidMethod = await adminUser.comparePassword(testPassword);
-        console.log('🔑 Model method compare:', isValidMethod);
+        const methodCompare = await adminUser.comparePassword(testPassword);
+        console.log('- Model method compare:', methodCompare ? '✅ Valid' : '❌ Invalid');
       } else {
-        console.log('⚠️  comparePassword method not available');
+        console.log('- Model method compare: ❌ Method not found');
       }
     }
 
-    // Check for any account locks
+    // 6. Reset any account locks
     if (adminUser.security.lockedUntil) {
-      const now = new Date();
-      const isLocked = adminUser.security.lockedUntil > now;
-      console.log('🔒 Account locked:', isLocked);
-      if (isLocked) {
-        console.log('⏰ Locked until:', adminUser.security.lockedUntil);
-        
-        // Unlock the account
-        adminUser.security.lockedUntil = undefined;
-        adminUser.security.loginAttempts = 0;
-        await adminUser.save();
-        console.log('🔓 Account unlocked');
-      }
+      adminUser.security.lockedUntil = undefined;
+      adminUser.security.loginAttempts = 0;
+      await adminUser.save();
+      console.log('🔓 Account unlocked');
     }
 
-    console.log('🔢 Login attempts:', adminUser.security.loginAttempts);
+    console.log('\n✅ Debug completed successfully!');
+    console.log('\nTest login with:');
+    console.log('- Email: admin@onlink.local');
+    console.log('- Password: admin123');
 
   } catch (error) {
-    console.error('❌ Error:', error);
+    console.error('❌ Debug error:', error);
   } finally {
     await mongoose.disconnect();
-    console.log('💾 Database connection closed');
+    console.log('\n💾 Database connection closed');
   }
 }
 
-testAdminLogin();
+// Run the debug script
+debugAuth().catch(console.error);
