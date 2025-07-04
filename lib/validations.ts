@@ -1,6 +1,10 @@
 // ============= lib/validations.ts =============
 import { z } from 'zod';
 
+// Helper function to validate MongoDB ObjectId
+const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+const isValidObjectId = (id: string) => objectIdRegex.test(id);
+
 // Auth validations
 export const LoginSchema = z.object({
   email: z.string().email('Invalid email address').max(255),
@@ -57,7 +61,9 @@ export const CreateURLSchema = z.object({
     .regex(/^[a-zA-Z0-9-_]+$/, 'Custom slug can only contain letters, numbers, hyphens, and underscores')
     .optional(),
   
-  folderId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid folder ID').optional(),
+  folderId: z.string()
+    .refine((id) => !id || isValidObjectId(id), 'Invalid folder ID format')
+    .optional(),
   
   title: z.string().max(200, 'Title is too long').optional(),
   description: z.string().max(500, 'Description is too long').optional(),
@@ -100,17 +106,28 @@ export const CreateURLSchema = z.object({
 
 export const BulkURLSchema = z.object({
   urls: z.array(z.string().url()).min(1, 'At least one URL is required').max(100, 'Maximum 100 URLs allowed'),
-  folderId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  folderId: z.string()
+    .refine((id) => !id || isValidObjectId(id), 'Invalid folder ID format')
+    .optional(),
   tags: z.array(z.string().max(50)).max(10).default([])
 });
 
-// Folder validations
+// Folder validations with enhanced parentId validation
 export const CreateFolderSchema = z.object({
   name: z.string().min(1, 'Folder name is required').max(100, 'Folder name is too long'),
   description: z.string().max(500, 'Description is too long').optional(),
   color: z.string().regex(/^#[0-9A-F]{6}$/i, 'Invalid color format').default('#3B82F6'),
   icon: z.string().max(50).optional(),
-  parentId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid parent folder ID').optional()
+  parentId: z.string()
+    .refine((id) => !id || isValidObjectId(id), 'Invalid parent folder ID format')
+    .optional()
+});
+
+export const UpdateFolderSchema = z.object({
+  name: z.string().min(1, 'Folder name is required').max(100, 'Folder name is too long').optional(),
+  description: z.string().max(500, 'Description is too long').optional(),
+  color: z.string().regex(/^#[0-9A-F]{6}$/i, 'Invalid color format').optional(),
+  icon: z.string().max(50).optional()
 });
 
 // Team validations
@@ -227,4 +244,47 @@ export const QRCodeSchema = z.object({
   backgroundColor: z.string().regex(/^#[0-9A-F]{6}$/i).default('#FFFFFF'),
   logo: z.string().url().optional(),
   format: z.enum(['png', 'svg', 'pdf']).default('png')
+});
+
+// Analytics validations
+export const AnalyticsQuerySchema = z.object({
+  linkId: z.string()
+    .refine((id) => isValidObjectId(id), 'Invalid link ID format')
+    .optional(),
+  period: z.enum(['24h', '7d', '30d', '90d', '1y']).default('7d'),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  groupBy: z.enum(['hour', 'day', 'week', 'month']).default('day')
+});
+
+// Webhook validations
+export const CreateWebhookSchema = z.object({
+  name: z.string().min(1, 'Webhook name is required').max(100),
+  url: z.string().url('Invalid webhook URL'),
+  events: z.array(z.enum(['click', 'link.created', 'link.updated', 'link.deleted'])).min(1, 'At least one event is required'),
+  isActive: z.boolean().default(true),
+  secret: z.string().min(8, 'Secret must be at least 8 characters').max(64).optional()
+});
+
+// API Key validations
+export const CreateAPIKeySchema = z.object({
+  name: z.string().min(1, 'API key name is required').max(100),
+  permissions: z.array(z.enum(['read', 'write', 'delete', 'analytics'])).min(1, 'At least one permission is required'),
+  expiresAt: z.string().datetime().optional(),
+  rateLimit: z.number().min(1).max(10000).default(1000)
+});
+
+// Batch operation validations
+export const BatchUpdateLinksSchema = z.object({
+  linkIds: z.array(z.string().refine(isValidObjectId, 'Invalid link ID format')).min(1, 'At least one link ID is required'),
+  updates: z.object({
+    folderId: z.string().refine((id) => !id || isValidObjectId(id), 'Invalid folder ID format').optional(),
+    tags: z.array(z.string().max(50)).optional(),
+    isActive: z.boolean().optional()
+  })
+});
+
+export const BatchDeleteLinksSchema = z.object({
+  linkIds: z.array(z.string().refine(isValidObjectId, 'Invalid link ID format')).min(1, 'At least one link ID is required'),
+  permanent: z.boolean().default(false)
 });
