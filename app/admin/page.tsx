@@ -105,7 +105,7 @@ export default function AdminOverviewPage() {
 
       setStats({
         users: {
-          total: usersData.data?.stats?.totalUsers || 0,
+          total: usersData.data?.stats.totalUsers,
           active: usersData.data?.stats?.activeUsers || 0,
           newToday: usersData.data?.stats?.newUsersToday || 0,
           byPlan: {

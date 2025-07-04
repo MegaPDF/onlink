@@ -4,9 +4,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import { User } from '@/models/User';
-import { Folder } from '@/models/Folder';
 import { URL } from '@/models/URL';
 import { CreateFolderSchema } from '@/lib/validations';
+import { Folder } from '@/models/Folder';
 
 export async function GET(req: NextRequest) {
   try {
@@ -49,20 +49,20 @@ export async function GET(req: NextRequest) {
     ]);
 
     // Merge stats with folders
-    const foldersWithStats = folders.map(folder => {
-      const stats = folderStats.find(stat => 
-        stat._id.toString() === folder.id.toString()
-      );
+    // const foldersWithStats = folders.map(folder => {
+    //   const stats = folderStats.find(stat => 
+    //     stat._id.toString() === folder.id.toString()
+    //   );
       
-      return {
-        ...folder,
-        stats: {
-          urlCount: stats?.urlCount || 0,
-          totalClicks: stats?.totalClicks || 0,
-          lastUpdated: new Date()
-        }
-      };
-    });
+    //   return {
+    //     ...folder,
+    //     stats: {
+    //       urlCount: stats?.urlCount || 0,
+    //       totalClicks: stats?.totalClicks || 0,
+    //       lastUpdated: new Date()
+    //     }
+    //   };
+    // });
 
     // Get uncategorized URLs count
     const uncategorizedCount = await URL.countDocuments({

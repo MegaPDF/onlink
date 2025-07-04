@@ -10,6 +10,29 @@ import { AuditLog } from '@/models/AuditLog';
 import { SecurityService } from '@/lib/security';
 import { EmailService } from '@/lib/email';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
+import { generateSecureToken } from '@/lib/utils';
+
+// Validation schemas
+const createUserSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
+  email: z.string().email('Invalid email address'),
+  role: z.enum(['user', 'admin', 'moderator']).default('user'),
+  plan: z.enum(['free', 'premium', 'enterprise']).default('free'),
+  isActive: z.boolean().default(true),
+  isEmailVerified: z.boolean().default(false),
+  sendWelcomeEmail: z.boolean().default(true),
+  temporaryPassword: z.string().min(8, 'Password must be at least 8 characters').optional()
+});
+
+const updateUserSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  email: z.string().email().optional(),
+  role: z.enum(['user', 'admin', 'moderator']).optional(),
+  plan: z.enum(['free', 'premium', 'enterprise']).optional(),
+  isActive: z.boolean().optional(),
+  isEmailVerified: z.boolean().optional()
+});
 
 // Get all users with pagination and filters
 export async function GET(req: NextRequest) {
@@ -36,7 +59,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    // Use Next.js 15 pattern for searchParams
+    // Parse query parameters
     const page = parseInt(req.nextUrl.searchParams.get('page') || '1');
     const limit = parseInt(req.nextUrl.searchParams.get('limit') || '10');
     const search = req.nextUrl.searchParams.get('search') || '';
@@ -80,9 +103,12 @@ export async function GET(req: NextRequest) {
           _id: null,
           totalUsers: { $sum: 1 },
           activeUsers: { $sum: { $cond: ['$isActive', 1, 0] } },
+          inactiveUsers: { $sum: { $cond: [{ $eq: ['$isActive', false] }, 1, 0] } },
           freeUsers: { $sum: { $cond: [{ $eq: ['$plan', 'free'] }, 1, 0] } },
           premiumUsers: { $sum: { $cond: [{ $eq: ['$plan', 'premium'] }, 1, 0] } },
-          enterpriseUsers: { $sum: { $cond: [{ $eq: ['$plan', 'enterprise'] }, 1, 0] } }
+          enterpriseUsers: { $sum: { $cond: [{ $eq: ['$plan', 'enterprise'] }, 1, 0] } },
+          adminUsers: { $sum: { $cond: [{ $eq: ['$role', 'admin'] }, 1, 0] } },
+          moderatorUsers: { $sum: { $cond: [{ $eq: ['$role', 'moderator'] }, 1, 0] } }
         }
       }
     ]);
@@ -102,15 +128,201 @@ export async function GET(req: NextRequest) {
         stats: stats[0] || {
           totalUsers: 0,
           activeUsers: 0,
+          inactiveUsers: 0,
           freeUsers: 0,
           premiumUsers: 0,
-          enterpriseUsers: 0
+          enterpriseUsers: 0,
+          adminUsers: 0,
+          moderatorUsers: 0
         }
       }
     });
 
   } catch (error) {
     console.error('Admin users GET error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// Create new user (admin action)
+export async function POST(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    await connectDB();
+
+    // Check admin permissions
+    const currentUser = await User.findById(session.user.id);
+    if (currentUser?.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const body = await req.json();
+    const validatedData = createUserSchema.parse(body);
+
+    // Check if email already exists
+    const existingUser = await User.findOne({ 
+      email: validatedData.email,
+      isDeleted: false 
+    });
+
+    if (existingUser) {
+      return NextResponse.json({ 
+        error: 'A user with this email already exists' 
+      }, { status: 400 });
+    }
+
+    // Generate temporary password if not provided
+    const tempPassword = validatedData.temporaryPassword || generateSecureToken(12);
+    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
+    // Generate email verification token
+    const emailVerificationToken = generateSecureToken(32);
+    const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    // Create new user
+    const newUser = new User({
+      name: validatedData.name,
+      email: validatedData.email,
+      password: hashedPassword,
+      role: validatedData.role,
+      plan: validatedData.plan,
+      isActive: validatedData.isActive,
+      isEmailVerified: validatedData.isEmailVerified,
+      emailVerificationToken: validatedData.isEmailVerified ? undefined : emailVerificationToken,
+      emailVerificationExpires: validatedData.isEmailVerified ? undefined : emailVerificationExpires,
+      createdBy: session.user.id,
+      usage: {
+        linksCount: 0,
+        clicksCount: 0,
+        monthlyLinks: 0,
+        monthlyClicks: 0,
+        resetDate: new Date(),
+        lastUpdated: new Date()
+      },
+      preferences: {
+        timezone: 'UTC',
+        language: 'en',
+        dateFormat: 'MM/dd/yyyy',
+        timeFormat: '12h',
+        notifications: {
+          email: true,
+          browser: true,
+          marketing: false
+        }
+      },
+      security: {
+        loginAttempts: 0,
+        lockedUntil: null,
+        lastLoginIP: null,
+        lastLoginAt: null,
+        twoFactorEnabled: false,
+        backupCodes: []
+      }
+    });
+
+    await newUser.save();
+
+    // Send welcome email if requested
+    if (validatedData.sendWelcomeEmail) {
+      try {
+        if (validatedData.isEmailVerified) {
+          // Send welcome email with temporary password
+          await EmailService.sendWelcomeEmail(
+            validatedData.email,
+            validatedData.name
+          );
+        } else {
+          // Send email verification
+          await EmailService.sendVerificationEmail(
+            validatedData.email,
+            validatedData.name,
+            emailVerificationToken
+          );
+        }
+      } catch (emailError) {
+        console.error('Failed to send welcome email:', emailError);
+        // Don't fail user creation if email fails
+      }
+    }
+
+    // Log user creation
+    await SecurityService.logSecurityEvent(
+      session.user.id,
+      'create_user',
+      {
+        ip: req.headers.get('x-forwarded-for') || '127.0.0.1',
+        userAgent: req.headers.get('user-agent') || ''
+      },
+      { success: true }
+    );
+
+    const auditLog = new AuditLog({
+      userId: session.user.id,
+      userEmail: currentUser.email,
+      userName: currentUser.name,
+      action: 'create_user',
+      resource: 'user',
+      resourceId: newUser._id.toString(),
+      details: {
+        method: 'POST',
+        changes: [
+          { field: 'name', newValue: validatedData.name },
+          { field: 'email', newValue: validatedData.email },
+          { field: 'role', newValue: validatedData.role },
+          { field: 'plan', newValue: validatedData.plan },
+          { field: 'isActive', newValue: validatedData.isActive }
+        ]
+      },
+      context: {
+        ip: req.headers.get('x-forwarded-for') || '127.0.0.1',
+        userAgent: req.headers.get('user-agent') || ''
+      },
+      result: {
+        success: true,
+        statusCode: 201
+      },
+      risk: {
+        level: 'medium',
+        factors: ['admin_action', 'user_creation'],
+        score: 60
+      }
+    });
+
+    await auditLog.save();
+
+    // Return user without sensitive data
+    const responseUser = {
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      plan: newUser.plan,
+      isActive: newUser.isActive,
+      isEmailVerified: newUser.isEmailVerified,
+      createdAt: newUser.createdAt,
+      temporaryPassword: validatedData.sendWelcomeEmail ? tempPassword : undefined
+    };
+
+    return NextResponse.json({
+      success: true,
+      message: 'User created successfully',
+      data: responseUser
+    }, { status: 201 });
+
+  } catch (error) {
+    console.error('Admin user creation error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ 
+        error: 'Validation failed',
+        details: error.errors 
+      }, { status: 400 });
+    }
+
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -131,30 +343,19 @@ export async function PUT(req: NextRequest) {
     }
 
     const userId = req.nextUrl.searchParams.get('userId');
-
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
     const body = await req.json();
-
-    // Validation schema for user updates
-    const updateUserSchema = z.object({
-      name: z.string().min(1).max(100).optional(),
-      email: z.string().email().optional(),
-      role: z.enum(['user', 'admin']).optional(),
-      plan: z.enum(['free', 'premium', 'enterprise']).optional(),
-      isActive: z.boolean().optional(),
-      isEmailVerified: z.boolean().optional()
-    });
-
     const validatedUpdates = updateUserSchema.parse(body);
 
     // Check if email is being changed and if it's already taken
     if (validatedUpdates.email) {
       const existingUser = await User.findOne({ 
         email: validatedUpdates.email, 
-        _id: { $ne: userId } 
+        _id: { $ne: userId },
+        isDeleted: false
       });
       if (existingUser) {
         return NextResponse.json({ error: 'Email already in use' }, { status: 400 });
@@ -162,13 +363,29 @@ export async function PUT(req: NextRequest) {
     }
 
     const originalUser = await User.findById(userId);
-    if (!originalUser) {
+    if (!originalUser || originalUser.isDeleted) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    // Prevent admin from deactivating themselves
+    if (userId === session.user.id && validatedUpdates.isActive === false) {
+      return NextResponse.json({ 
+        error: 'You cannot deactivate your own account' 
+      }, { status: 400 });
+    }
+
+    // Update user with status change tracking
+    const updateData: any = { ...validatedUpdates };
+    
+    // Track status changes
+    if (validatedUpdates.isActive !== undefined && validatedUpdates.isActive !== originalUser.isActive) {
+      updateData.statusChangedAt = new Date();
+      updateData.statusChangedBy = session.user.id;
     }
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      validatedUpdates,
+      updateData,
       { new: true, runValidators: true }
     ).select('-password -security.twoFactorSecret');
 
@@ -193,7 +410,7 @@ export async function PUT(req: NextRequest) {
       userId: session.user.id,
       userEmail: currentUser.email,
       userName: currentUser.name,
-      action: 'update_user',
+      action: validatedUpdates.isActive !== undefined ? 'update_user_status' : 'update_user',
       resource: 'user',
       resourceId: userId,
       details: {
@@ -225,6 +442,14 @@ export async function PUT(req: NextRequest) {
 
   } catch (error) {
     console.error('Admin user update error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ 
+        error: 'Validation failed',
+        details: error.errors 
+      }, { status: 400 });
+    }
+
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -245,7 +470,6 @@ export async function DELETE(req: NextRequest) {
     }
 
     const userId = req.nextUrl.searchParams.get('userId');
-
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
@@ -256,7 +480,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     const userToDelete = await User.findById(userId);
-    if (!userToDelete) {
+    if (!userToDelete || userToDelete.isDeleted) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
@@ -264,13 +488,18 @@ export async function DELETE(req: NextRequest) {
     await User.findByIdAndUpdate(userId, {
       isDeleted: true,
       deletedAt: new Date(),
+      deletedBy: session.user.id,
       isActive: false
     });
 
-    // Soft delete user's URLs using the renamed model
+    // Soft delete user's URLs
     await URLModel.updateMany(
       { userId, isDeleted: false },
-      { isDeleted: true, deletedAt: new Date() }
+      { 
+        isDeleted: true, 
+        deletedAt: new Date(),
+        deletedBy: session.user.id
+      }
     );
 
     // Log deletion
@@ -284,6 +513,37 @@ export async function DELETE(req: NextRequest) {
       { success: true }
     );
 
+    const auditLog = new AuditLog({
+      userId: session.user.id,
+      userEmail: currentUser.email,
+      userName: currentUser.name,
+      action: 'delete_user',
+      resource: 'user',
+      resourceId: userId,
+      details: {
+        method: 'DELETE',
+        metadata: {
+          deletedUserEmail: userToDelete.email,
+          deletedUserName: userToDelete.name
+        }
+      },
+      context: {
+        ip: req.headers.get('x-forwarded-for') || '127.0.0.1',
+        userAgent: req.headers.get('user-agent') || ''
+      },
+      result: {
+        success: true,
+        statusCode: 200
+      },
+      risk: {
+        level: 'high',
+        factors: ['admin_action', 'user_deletion'],
+        score: 80
+      }
+    });
+
+    await auditLog.save();
+
     return NextResponse.json({
       success: true,
       message: 'User deleted successfully'
@@ -294,4 +554,3 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
