@@ -1,4 +1,3 @@
-// ============= models/URL.ts =============
 import mongoose, { Schema, Document } from 'mongoose';
 export interface IURL extends Document {
   _id: string;

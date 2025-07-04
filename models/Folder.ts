@@ -1,4 +1,3 @@
-// ============= models/Folder.ts =============
 import mongoose, { Schema, Document } from 'mongoose';
 export interface IFolder extends Document {
   _id: string;

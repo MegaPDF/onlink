@@ -1,4 +1,3 @@
-// ============= models/Settings.ts =============
 import mongoose, { Schema, Document } from 'mongoose';
 export interface ISettings extends Document {
   _id: string;

@@ -1,16 +1,14 @@
-// ============= models/Team.ts =============
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema } from "mongoose";
+
 export interface ITeam extends Document {
   _id: string;
   name: string;
   description?: string;
-  slug: string; // Unique team identifier
+  slug: string;
   logo?: string;
   
-  // Ownership
   ownerId: mongoose.Types.ObjectId;
   
-  // Members with roles
   members: {
     userId: mongoose.Types.ObjectId;
     role: 'owner' | 'admin' | 'member' | 'viewer';
@@ -23,11 +21,10 @@ export interface ITeam extends Document {
       manageBilling: boolean;
     };
     joinedAt: Date;
-    invitedBy: mongoose.Types.ObjectId;
+    invitedBy?: mongoose.Types.ObjectId;
     status: 'active' | 'pending' | 'suspended';
   }[];
   
-  // Plan and billing
   plan: 'team' | 'enterprise';
   billing: {
     stripeCustomerId?: string;
@@ -35,42 +32,39 @@ export interface ITeam extends Document {
     stripePriceId?: string;
     billingEmail: string;
     billingAddress?: {
-      line1: string;
+      line1?: string;
       line2?: string;
-      city: string;
-      state: string;
-      postal_code: string;
-      country: string;
+      city?: string;
+      state?: string;
+      postal_code?: string;
+      country?: string;
     };
   };
   
-  // Team settings
   settings: {
     defaultDomain?: string;
     customDomains: string[];
     allowCustomDomains: boolean;
     requireApproval: boolean;
     maxMembers: number;
-    linkRetention: number; // Days to keep deleted links
+    linkRetention: number;
     enforceSSO: boolean;
     allowGuestLinks: boolean;
-    branding: {
+    branding?: {
       primaryColor?: string;
       logo?: string;
       customCss?: string;
     };
   };
   
-  // Usage tracking (synced with User and URL models)
   usage: {
     linksCount: number;
     clicksCount: number;
     membersCount: number;
-    storageUsed: number; // In bytes
+    storageUsed: number;
     lastUpdated: Date;
   };
   
-  // Limits based on plan
   limits: {
     maxMembers: number;
     maxLinks: number;
@@ -79,7 +73,6 @@ export interface ITeam extends Document {
     customDomains: number;
   };
   
-  // Status and timestamps
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -146,6 +139,7 @@ const TeamSchema = new Schema<ITeam>({
     default: 'team',
     index: true
   },
+  
   billing: {
     stripeCustomerId: { type: String, index: true },
     stripeSubscriptionId: { type: String, index: true },
@@ -187,10 +181,10 @@ const TeamSchema = new Schema<ITeam>({
   
   limits: {
     maxMembers: { type: Number, default: 10 },
-    maxLinks: { type: Number, default: 1000 },
-    maxClicks: { type: Number, default: 10000 },
-    maxStorage: { type: Number, default: 1000000000 }, // 1GB
-    customDomains: { type: Number, default: 1 }
+    maxLinks: { type: Number, default: -1 },
+    maxClicks: { type: Number, default: -1 },
+    maxStorage: { type: Number, default: 10737418240 }, // 10GB
+    customDomains: { type: Number, default: 3 }
   },
   
   isActive: { type: Boolean, default: true, index: true },
@@ -201,8 +195,9 @@ const TeamSchema = new Schema<ITeam>({
 });
 
 // Indexes
-TeamSchema.index({ ownerId: 1, isDeleted: 1 });
+TeamSchema.index({ ownerId: 1 });
 TeamSchema.index({ 'members.userId': 1 });
 TeamSchema.index({ plan: 1, isActive: 1 });
+TeamSchema.index({ slug: 1 }, { unique: true });
 
-export const Team = mongoose.models.Team || mongoose.model<ITeam>('Team', TeamSchema);
+export const Team = mongoose.models.Team || mongoose.model('Team', TeamSchema);

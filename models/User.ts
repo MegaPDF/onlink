@@ -1,5 +1,5 @@
-// ============= models/User.ts =============
 import mongoose, { Schema, Document } from 'mongoose';
+import * as bcrypt from 'bcryptjs';
 
 export interface IUser extends Document {
   _id: string;
@@ -11,8 +11,7 @@ export interface IUser extends Document {
   role: 'user' | 'admin' | 'moderator';
   plan: 'free' | 'premium' | 'enterprise';
   
-  // Subscription info
-  subscription?: {
+  subscription: {
     stripeCustomerId?: string;
     stripeSubscriptionId?: string;
     stripePriceId?: string;
@@ -20,28 +19,26 @@ export interface IUser extends Document {
     status: 'active' | 'inactive' | 'canceled' | 'past_due';
   };
   
-  // Usage tracking (synced with URL and Analytics models)
   usage: {
-    linksCount: number;        // Total links created (sync with URL count)
-    clicksCount: number;       // Total clicks received (sync with Analytics)
-    monthlyLinks: number;      // Current month links (resets monthly)
-    monthlyClicks: number;     // Current month clicks (resets monthly)
-    resetDate: Date;           // When monthly counters reset
-    lastUpdated: Date;         // Last sync timestamp
+    linksCount: number;
+    clicksCount: number;
+    monthlyLinks: number;
+    monthlyClicks: number;
+    resetDate: Date;
+    lastUpdated: Date;
   };
   
-  // User preferences
   preferences: {
-    defaultDomain?: string;    // Default domain for new links
-    customDomain?: string;     // User's custom domain
-    timezone: string;          // User timezone for analytics
-    language: string;          // UI language
-    dateFormat: string;        // Date display format
+    defaultDomain?: string;
+    customDomain?: string;
+    timezone: string;
+    language: string;
+    dateFormat: string;
     notifications: {
       email: boolean;
       marketing: boolean;
       security: boolean;
-      analytics: boolean;      // Weekly/monthly reports
+      analytics: boolean;
     };
     privacy: {
       publicProfile: boolean;
@@ -49,14 +46,12 @@ export interface IUser extends Document {
     };
   };
   
-  // Team association
   team?: {
     teamId: mongoose.Types.ObjectId;
     role: 'owner' | 'admin' | 'member' | 'viewer';
     joinedAt: Date;
   };
   
-  // Security & activity
   security: {
     twoFactorEnabled: boolean;
     twoFactorSecret?: string;
@@ -66,7 +61,6 @@ export interface IUser extends Document {
     ipWhitelist: string[];
   };
   
-  // Timestamps and status
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt?: Date;
@@ -75,6 +69,9 @@ export interface IUser extends Document {
   isEmailVerified: boolean;
   isDeleted: boolean;
   deletedAt?: Date;
+  
+  // Methods
+  comparePassword(candidatePassword: string): Promise<boolean>;
 }
 
 const UserSchema = new Schema<IUser>({
@@ -89,8 +86,7 @@ const UserSchema = new Schema<IUser>({
     required: true, 
     unique: true, 
     lowercase: true,
-    trim: true,
-    index: true
+    trim: true
   },
   password: { 
     type: String,
@@ -101,19 +97,17 @@ const UserSchema = new Schema<IUser>({
   role: { 
     type: String, 
     enum: ['user', 'admin', 'moderator'], 
-    default: 'user',
-    index: true
+    default: 'user'
   },
   plan: { 
     type: String, 
     enum: ['free', 'premium', 'enterprise'], 
-    default: 'free',
-    index: true
+    default: 'free'
   },
   
   subscription: {
-    stripeCustomerId: { type: String, index: true },
-    stripeSubscriptionId: { type: String, index: true },
+    stripeCustomerId: { type: String },
+    stripeSubscriptionId: { type: String },
     stripePriceId: { type: String },
     stripeCurrentPeriodEnd: { type: Date },
     status: { 
@@ -168,32 +162,40 @@ const UserSchema = new Schema<IUser>({
     ipWhitelist: [{ type: String }]
   },
   
+  isActive: { type: Boolean, default: true },
+  isEmailVerified: { type: Boolean, default: false },
   lastLoginAt: { type: Date },
   lastActiveAt: { type: Date },
-  isActive: { type: Boolean, default: true, index: true },
-  isEmailVerified: { type: Boolean, default: false },
-  isDeleted: { type: Boolean, default: false, index: true },
+  isDeleted: { type: Boolean, default: false },
   deletedAt: { type: Date }
 }, {
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  timestamps: true
 });
 
-// Indexes for performance
-UserSchema.index({ email: 1, isDeleted: 1 });
-UserSchema.index({ plan: 1, isActive: 1 });
+// Indexes - NO DUPLICATES
+UserSchema.index({ email: 1 }, { unique: true });
+UserSchema.index({ role: 1, plan: 1 });
+UserSchema.index({ 'subscription.stripeCustomerId': 1 });
+UserSchema.index({ isDeleted: 1, isActive: 1 });
 UserSchema.index({ 'team.teamId': 1 });
-UserSchema.index({ createdAt: -1 });
 
-// Virtual for plan limits
-UserSchema.virtual('planLimits').get(function() {
-  const limits = {
-    free: { links: 5, clicks: 1000, customDomain: false, analytics: false },
-    premium: { links: -1, clicks: -1, customDomain: true, analytics: true },
-    enterprise: { links: -1, clicks: -1, customDomain: true, analytics: true }
-  };
-  return limits[this.plan];
+// Pre-save middleware for password hashing
+UserSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  
+  try {
+    this.password = await bcrypt.hash(this.password!, 10);
+    next();
+  } catch (error) {
+    next(error as Error);
+  }
 });
+
+// Instance method for password comparison
+UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
+  if (!this.password) return false;
+  return bcrypt.compare(candidatePassword, this.password);
+};
 
 export const User = mongoose.models.User || mongoose.model<IUser>('User', UserSchema);
+

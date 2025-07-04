@@ -1,22 +1,20 @@
-// ============= models/Domain.ts =============
+// models/Domain.ts - FIXED VERSION
 import mongoose, { Schema, Document } from 'mongoose';
+
 export interface IDomain extends Document {
   _id: string;
   domain: string;
-  subdomain?: string; // For subdomains like 'app.example.com'
+  subdomain?: string;
   
-  // Ownership
   userId?: mongoose.Types.ObjectId;
   teamId?: mongoose.Types.ObjectId;
   
-  // Domain type and status
   type: 'system' | 'custom' | 'subdomain';
   isCustom: boolean;
   isVerified: boolean;
   isActive: boolean;
   sslEnabled: boolean;
   
-  // Verification
   verificationCode?: string;
   verificationMethod: 'dns' | 'file' | 'meta';
   dnsRecords: {
@@ -27,7 +25,6 @@ export interface IDomain extends Document {
     verifiedAt?: Date;
   }[];
   
-  // SSL Certificate
   ssl: {
     provider: 'letsencrypt' | 'cloudflare' | 'custom';
     issuer?: string;
@@ -36,7 +33,6 @@ export interface IDomain extends Document {
     autoRenew: boolean;
   };
   
-  // Domain settings
   settings: {
     redirectType: 301 | 302;
     forceHttps: boolean;
@@ -61,15 +57,13 @@ export interface IDomain extends Document {
     };
   };
   
-  // Usage statistics (synced with URL model)
   usage: {
     linksCount: number;
     clicksCount: number;
-    bandwidthUsed: number; // In bytes
+    bandwidthUsed: number;
     lastUpdated: Date;
   };
   
-  // Timestamps and status
   createdAt: Date;
   updatedAt: Date;
   lastUsedAt?: Date;
@@ -84,10 +78,10 @@ const DomainSchema = new Schema<IDomain>({
     unique: true,
     lowercase: true,
     trim: true,
-    index: true,
     validate: {
       validator: function(v: string) {
-        return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(v);
+        // Allow localhost with port for development, or standard domains
+        return /^(localhost:\d+|[a-z0-9.-]+\.[a-z]{2,})$/i.test(v);
       },
       message: 'Invalid domain format'
     }
@@ -100,24 +94,21 @@ const DomainSchema = new Schema<IDomain>({
   
   userId: { 
     type: Schema.Types.ObjectId, 
-    ref: 'User',
-    index: true
+    ref: 'User'
   },
   teamId: { 
     type: Schema.Types.ObjectId, 
-    ref: 'Team',
-    index: true
+    ref: 'Team'
   },
   
   type: { 
     type: String, 
     enum: ['system', 'custom', 'subdomain'], 
-    required: true,
-    index: true
+    required: true
   },
-  isCustom: { type: Boolean, default: false, index: true },
-  isVerified: { type: Boolean, default: false, index: true },
-  isActive: { type: Boolean, default: false, index: true },
+  isCustom: { type: Boolean, default: false },
+  isVerified: { type: Boolean, default: false },
+  isActive: { type: Boolean, default: false },
   sslEnabled: { type: Boolean, default: false },
   
   verificationCode: { type: String },
@@ -178,13 +169,14 @@ const DomainSchema = new Schema<IDomain>({
   },
   
   lastUsedAt: { type: Date },
-  isDeleted: { type: Boolean, default: false, index: true },
+  isDeleted: { type: Boolean, default: false },
   deletedAt: { type: Date }
 }, {
   timestamps: true
 });
 
-// Indexes
+// Single index definitions (remove duplicates)
+DomainSchema.index({ domain: 1 }, { unique: true });
 DomainSchema.index({ userId: 1, isDeleted: 1 });
 DomainSchema.index({ teamId: 1, isDeleted: 1 });
 DomainSchema.index({ type: 1, isActive: 1 });

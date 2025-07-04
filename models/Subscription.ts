@@ -1,4 +1,3 @@
-// ============= models/Subscription.ts =============
 import mongoose, { Schema, Document } from 'mongoose';
 export interface ISubscription extends Document {
   _id: string;

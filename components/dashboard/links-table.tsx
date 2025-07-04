@@ -1,4 +1,3 @@
-// ============= components/dashboard/links-table.tsx =============
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -32,6 +31,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -40,8 +41,20 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Search,
   Filter,
@@ -55,6 +68,15 @@ import {
   ExternalLink,
   Calendar,
   MousePointer,
+  Download,
+  Folder,
+  Tag,
+  Globe,
+  ChevronLeft,
+  ChevronRight,
+  Pause,
+  Play,
+  Settings,
 } from "lucide-react";
 import { formatNumber } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -94,15 +116,23 @@ export function LinksTable({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("");
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortOrder, setSortOrder] = useState("desc");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedFolder, setSelectedFolder] = useState(folderId || "");
+  const [folders, setFolders] = useState<any[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [selectedLinks, setSelectedLinks] = useState<string[]>([]);
+  const [bulkActionOpen, setBulkActionOpen] = useState(false);
 
   const fetchLinks = async () => {
     try {
       const params = new URLSearchParams({
         page: page.toString(),
         limit: "10",
+        sortBy,
+        sortOrder,
         ...(search && { search }),
         ...(statusFilter !== "all" && { status: statusFilter }),
         ...(tagFilter && { tag: tagFilter }),
@@ -115,6 +145,7 @@ export function LinksTable({
       if (response.ok) {
         setLinks(result.data.urls);
         setTotalPages(result.data.pagination.totalPages);
+        setTags(result.data.tags || []);
       } else {
         toast.error("Failed to fetch links");
       }
@@ -125,13 +156,37 @@ export function LinksTable({
     }
   };
 
+  const fetchFolders = async () => {
+    try {
+      const response = await fetch("/api/client/folders");
+      const result = await response.json();
+
+      if (response.ok) {
+        setFolders(result.data.folders);
+      }
+    } catch (error) {
+      console.error("Error loading folders");
+    }
+  };
+
   useEffect(() => {
     fetchLinks();
-  }, [page, search, statusFilter, tagFilter, selectedFolder]);
+    if (showFolderFilter) {
+      fetchFolders();
+    }
+  }, [
+    page,
+    search,
+    statusFilter,
+    tagFilter,
+    selectedFolder,
+    sortBy,
+    sortOrder,
+  ]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast.copySuccess();
+    toast.success("Copied to clipboard!");
   };
 
   const toggleLinkStatus = async (linkId: string, currentStatus: boolean) => {
@@ -157,21 +212,112 @@ export function LinksTable({
   };
 
   const deleteLink = async (linkId: string) => {
-    if (!confirm("Are you sure you want to delete this link?")) return;
-
     try {
       const response = await fetch(`/api/client/my-links?urlId=${linkId}`, {
         method: "DELETE",
       });
 
       if (response.ok) {
-        toast.deleteSuccess("Link deleted");
+        toast.success("Link deleted successfully");
         fetchLinks();
       } else {
         toast.error("Failed to delete link");
       }
     } catch (error) {
       toast.error("Error deleting link");
+    }
+  };
+
+  const handleBulkAction = async (action: string) => {
+    if (selectedLinks.length === 0) {
+      toast.error("No links selected");
+      return;
+    }
+
+    try {
+      let response;
+
+      switch (action) {
+        case "activate":
+          response = await fetch("/api/client/my-links/bulk", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              urlIds: selectedLinks,
+              updates: { isActive: true },
+            }),
+          });
+          break;
+        case "deactivate":
+          response = await fetch("/api/client/my-links/bulk", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              urlIds: selectedLinks,
+              updates: { isActive: false },
+            }),
+          });
+          break;
+        case "delete":
+          if (
+            !confirm(
+              `Are you sure you want to delete ${selectedLinks.length} links?`
+            )
+          ) {
+            return;
+          }
+          response = await fetch("/api/client/my-links/bulk", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ urlIds: selectedLinks }),
+          });
+          break;
+        default:
+          return;
+      }
+
+      if (response?.ok) {
+        toast.success(`Bulk ${action} completed successfully`);
+        setSelectedLinks([]);
+        fetchLinks();
+      } else {
+        toast.error(`Failed to ${action} links`);
+      }
+    } catch (error) {
+      toast.error("Error performing bulk action");
+    }
+  };
+
+  const exportLinks = async () => {
+    try {
+      const params = new URLSearchParams({
+        ...(search && { search }),
+        ...(statusFilter !== "all" && { status: statusFilter }),
+        ...(tagFilter && { tag: tagFilter }),
+        ...(selectedFolder && { folderId: selectedFolder }),
+        export: "true",
+      });
+
+      const response = await fetch(`/api/client/my-links/export?${params}`);
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `links-export-${
+          new Date().toISOString().split("T")[0]
+        }.csv`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        toast.success("Links exported successfully");
+      } else {
+        toast.error("Failed to export links");
+      }
+    } catch (error) {
+      toast.error("Error exporting links");
     }
   };
 
@@ -182,10 +328,32 @@ export function LinksTable({
     if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
       return <Badge variant="destructive">Expired</Badge>;
     }
-    return (
-      <Badge variant="default" className="bg-green-500">
-        Active
-      </Badge>
+    return <Badge className="bg-green-500 hover:bg-green-600">Active</Badge>;
+  };
+
+  const handleSort = (column: string) => {
+    if (sortBy === column) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(column);
+      setSortOrder("desc");
+    }
+    setPage(1);
+  };
+
+  const selectAllLinks = () => {
+    if (selectedLinks.length === links.length) {
+      setSelectedLinks([]);
+    } else {
+      setSelectedLinks(links.map((link) => link.id));
+    }
+  };
+
+  const selectLink = (linkId: string) => {
+    setSelectedLinks((prev) =>
+      prev.includes(linkId)
+        ? prev.filter((id) => id !== linkId)
+        : [...prev, linkId]
     );
   };
 
@@ -204,10 +372,51 @@ export function LinksTable({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>My Links</CardTitle>
-        <CardDescription>
-          Manage and monitor your shortened URLs
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>My Links</CardTitle>
+            <CardDescription>
+              Manage and monitor your shortened URLs
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={exportLinks}>
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+            {selectedLinks.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    Actions ({selectedLinks.length})
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => handleBulkAction("activate")}
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    Activate
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleBulkAction("deactivate")}
+                  >
+                    <Pause className="h-4 w-4 mr-2" />
+                    Deactivate
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => handleBulkAction("delete")}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         {/* Filters */}
@@ -233,156 +442,215 @@ export function LinksTable({
               <SelectItem value="expired">Expired</SelectItem>
             </SelectContent>
           </Select>
+
+          {showFolderFilter && (
+            <Select value={selectedFolder} onValueChange={setSelectedFolder}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="All Folders" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Folders</SelectItem>
+                <SelectItem value="null">Uncategorized</SelectItem>
+                {folders.map((folder) => (
+                  <SelectItem key={folder._id} value={folder._id}>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: folder.color || "#3B82F6" }}
+                      />
+                      {folder.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {tags.length > 0 && (
+            <Select value={tagFilter} onValueChange={setTagFilter}>
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="All Tags" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All Tags</SelectItem>
+                {tags.map((tag) => (
+                  <SelectItem key={tag} value={tag}>
+                    <div className="flex items-center gap-2">
+                      <Tag className="w-3 h-3" />
+                      {tag}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {/* Links Table */}
         {links.length === 0 ? (
           <EmptyState
-            icon={ExternalLink}
+            icon={Globe}
             title="No links found"
-            description="Create your first shortened link to get started"
+            description="Create your first shortened link to get started."
             action={{
               label: "Create Link",
-              onClick: () => (window.location.href = "/dashboard"),
+              onClick: () => {
+                // TODO: Implement create link action, e.g., open a modal or navigate
+              },
+              variant: "default",
             }}
           />
         ) : (
-          <div className="space-y-4">
-            <div className="rounded-lg border">
+          <>
+            <div className="rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>URL</TableHead>
-                    <TableHead>Clicks</TableHead>
+                    <TableHead className="w-[50px]">
+                      <input
+                        type="checkbox"
+                        checked={
+                          selectedLinks.length === links.length &&
+                          links.length > 0
+                        }
+                        onChange={selectAllLinks}
+                        className="rounded border-gray-300"
+                      />
+                    </TableHead>
+                    <TableHead
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort("originalUrl")}
+                    >
+                      Original URL
+                    </TableHead>
+                    <TableHead>Short URL</TableHead>
+                    <TableHead
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort("clicks.total")}
+                    >
+                      Clicks
+                    </TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="w-12"></TableHead>
+                    <TableHead
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => handleSort("createdAt")}
+                    >
+                      Created
+                    </TableHead>
+                    <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {links.map((link) => (
                     <TableRow key={link.id}>
                       <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={selectedLinks.includes(link.id)}
+                          onChange={() => selectLink(link.id)}
+                          className="rounded border-gray-300"
+                        />
+                      </TableCell>
+                      <TableCell>
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <div className="font-medium text-sm">
-                              {link.title || "Untitled"}
+                            <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium truncate max-w-[300px]">
+                              {link.title || link.originalUrl}
+                            </span>
+                          </div>
+                          {link.folder && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <div
+                                className="w-2 h-2 rounded-full"
+                                style={{
+                                  backgroundColor:
+                                    link.folder.color || "#3B82F6",
+                                }}
+                              />
+                              {link.folder.name}
                             </div>
-                            {link.folder && (
-                              <Badge
-                                variant="outline"
-                                className="text-xs"
-                                style={{ color: link.folder.color }}
-                              >
-                                {link.folder.name}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span className="font-mono">{link.shortUrl}</span>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-4 w-4 p-0"
-                              onClick={() => copyToClipboard(link.shortUrl)}
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate max-w-md">
-                            {link.originalUrl}
-                          </div>
+                          )}
                           {link.tags.length > 0 && (
-                            <div className="flex gap-1 flex-wrap">
-                              {link.tags.map((tag) => (
+                            <div className="flex flex-wrap gap-1">
+                              {link.tags.slice(0, 3).map((tag) => (
                                 <Badge
                                   key={tag}
                                   variant="outline"
                                   className="text-xs"
                                 >
-                                  #{tag}
+                                  {tag}
                                 </Badge>
                               ))}
+                              {link.tags.length > 3 && (
+                                <Badge variant="outline" className="text-xs">
+                                  +{link.tags.length - 3}
+                                </Badge>
+                              )}
                             </div>
                           )}
                         </div>
                       </TableCell>
-
                       <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <MousePointer className="h-3 w-3 text-muted-foreground" />
-                            <span className="font-medium">
-                              {formatNumber(link.clicks.total)}
-                            </span>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {formatNumber(link.clicks.unique)} unique
-                          </div>
-                          {link.lastClickAt && (
-                            <div className="text-xs text-muted-foreground">
-                              Last:{" "}
-                              {formatDistanceToNow(new Date(link.lastClickAt), {
-                                addSuffix: true,
-                              })}
-                            </div>
-                          )}
+                        <div className="flex items-center gap-2">
+                          <code className="text-sm bg-muted px-2 py-1 rounded">
+                            {link.shortCode}
+                          </code>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => copyToClipboard(link.shortUrl)}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
                         </div>
                       </TableCell>
-
                       <TableCell>
-                        {getStatusBadge(link)}
-                        {link.expiresAt && (
-                          <div className="text-xs text-muted-foreground mt-1">
-                            <Calendar className="h-3 w-3 inline mr-1" />
-                            Expires{" "}
-                            {formatDistanceToNow(new Date(link.expiresAt), {
-                              addSuffix: true,
-                            })}
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <MousePointer className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">
+                            {formatNumber(link.clicks.total)}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            ({formatNumber(link.clicks.unique)} unique)
+                          </span>
+                        </div>
                       </TableCell>
-
-                      <TableCell>
-                        <div className="text-sm">
+                      <TableCell>{getStatusBadge(link)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
                           {formatDistanceToNow(new Date(link.createdAt), {
                             addSuffix: true,
                           })}
                         </div>
                       </TableCell>
-
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
+                            <Button variant="ghost" size="icon">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() =>
-                                window.open(link.shortUrl, "_blank")
-                              }
-                            >
-                              <ExternalLink className="mr-2 h-4 w-4" />
-                              Visit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
                               onClick={() => copyToClipboard(link.shortUrl)}
                             >
-                              <Copy className="mr-2 h-4 w-4" />
-                              Copy
+                              <Copy className="w-4 h-4 mr-2" />
+                              Copy Link
                             </DropdownMenuItem>
                             <DropdownMenuItem>
-                              <QrCode className="mr-2 h-4 w-4" />
+                              <QrCode className="w-4 h-4 mr-2" />
                               QR Code
                             </DropdownMenuItem>
                             <DropdownMenuItem>
-                              <BarChart3 className="mr-2 h-4 w-4" />
+                              <BarChart3 className="w-4 h-4 mr-2" />
                               Analytics
                             </DropdownMenuItem>
+                            <DropdownMenuSeparator />
                             <DropdownMenuItem>
-                              <Edit className="mr-2 h-4 w-4" />
+                              <Edit className="w-4 h-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
                             <DropdownMenuItem
@@ -390,16 +658,50 @@ export function LinksTable({
                                 toggleLinkStatus(link.id, link.isActive)
                               }
                             >
-                              <Eye className="mr-2 h-4 w-4" />
-                              {link.isActive ? "Deactivate" : "Activate"}
+                              {link.isActive ? (
+                                <>
+                                  <Pause className="w-4 h-4 mr-2" />
+                                  Deactivate
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-4 h-4 mr-2" />
+                                  Activate
+                                </>
+                              )}
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => deleteLink(link.id)}
-                              className="text-red-600"
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
-                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onSelect={(e) => e.preventDefault()}
+                                >
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>
+                                    Delete Link
+                                  </AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to delete this link?
+                                    This action cannot be undone.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => deleteLink(link.id)}
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                    Delete Link
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -411,27 +713,33 @@ export function LinksTable({
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between">
-                <Button
-                  variant="outline"
-                  disabled={page === 1}
-                  onClick={() => setPage(page - 1)}
-                >
-                  Previous
-                </Button>
-                <span className="text-sm text-muted-foreground">
+              <div className="flex items-center justify-between mt-4">
+                <div className="text-sm text-muted-foreground">
                   Page {page} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  disabled={page === totalPages}
-                  onClick={() => setPage(page + 1)}
-                >
-                  Next
-                </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(page - 1)}
+                    disabled={page === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(page + 1)}
+                    disabled={page === totalPages}
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             )}
-          </div>
+          </>
         )}
       </CardContent>
     </Card>

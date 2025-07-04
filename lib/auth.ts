@@ -47,80 +47,80 @@ export const authOptions: NextAuthOptions = {
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' }
       },
-      async authorize(credentials, req) {
-        if (!credentials?.email || !credentials?.password) {
-          return null;
-        }
-
-        try {
-          await connectDB();
-          
-          const user = await User.findOne({ 
-            email: credentials.email.toLowerCase(),
-            isDeleted: false 
-          });
-
-          if (!user || !user.password) {
-            // Log failed login attempt
-            await logLoginAttempt(credentials.email, req, false, 'Invalid credentials');
-            return null;
-          }
-
-          // Check if account is locked
-          if (user.security.lockedUntil && user.security.lockedUntil > new Date()) {
-            await logLoginAttempt(credentials.email, req, false, 'Account locked');
-            return null;
-          }
-
-          // Verify password
-          const isValid = await bcrypt.compare(credentials.password, user.password);
-          
-          if (!isValid) {
-            // Increment login attempts
-            user.security.loginAttempts += 1;
-            
-            // Lock account after max attempts
-            if (user.security.loginAttempts >= 5) {
-              user.security.lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-            }
-            
-            await user.save();
-            await logLoginAttempt(credentials.email, req, false, 'Invalid password');
-            return null;
-          }
-
-          // Check if account is active
-          if (!user.isActive) {
-            await logLoginAttempt(credentials.email, req, false, 'Account inactive');
-            return null;
-          }
-
-          // Reset login attempts on successful login
-          user.security.loginAttempts = 0;
-          user.security.lockedUntil = undefined;
-          user.lastLoginAt = new Date();
-          user.lastActiveAt = new Date();
-          await user.save();
-
-          // Log successful login
-          await logLoginAttempt(credentials.email, req, true);
-
-          return {
-            id: user._id.toString(),
-            name: user.name,
-            email: user.email,
-            image: user.image,
-            role: user.role,
-            plan: user.plan,
-            emailVerified: user.emailVerified,
-            isActive: user.isActive,
-            team: user.team
-          };
-        } catch (error) {
-          console.error('Auth error:', error);
-          return null;
-        }
-      }
+     
+     async authorize(credentials, req) {
+       if (!credentials?.email || !credentials?.password) {
+         return null;
+       }
+     
+       try {
+         await connectDB();
+         
+         const user = await User.findOne({ 
+           email: credentials.email.toLowerCase(),
+           isDeleted: false 
+         });
+     
+         if (!user || !user.password) {
+           await logLoginAttempt(credentials.email, req, false, 'Invalid credentials');
+           return null;
+         }
+     
+         // Check if account is locked
+         if (user.security.lockedUntil && user.security.lockedUntil > new Date()) {
+           await logLoginAttempt(credentials.email, req, false, 'Account locked');
+           return null;
+         }
+     
+         // Use the comparePassword method
+         const isValid = await user.comparePassword(credentials.password);
+         
+         if (!isValid) {
+           // Increment login attempts
+           user.security.loginAttempts += 1;
+           
+           // Lock account after max attempts
+           if (user.security.loginAttempts >= 5) {
+             user.security.lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+           }
+           
+           await user.save();
+           await logLoginAttempt(credentials.email, req, false, 'Invalid password');
+           return null;
+         }
+     
+         // Check if account is active
+         if (!user.isActive) {
+           await logLoginAttempt(credentials.email, req, false, 'Account inactive');
+           return null;
+         }
+     
+         // Reset login attempts on successful login
+         user.security.loginAttempts = 0;
+         user.security.lockedUntil = undefined;
+         user.lastLoginAt = new Date();
+         user.lastActiveAt = new Date();
+         await user.save();
+     
+         // Log successful login
+         await logLoginAttempt(credentials.email, req, true);
+     
+         return {
+           id: user._id.toString(),
+           name: user.name,
+           email: user.email,
+           image: user.image,
+           role: user.role,
+           plan: user.plan,
+           emailVerified: user.emailVerified,
+           isActive: user.isActive,
+           team: user.team
+         };
+       } catch (error) {
+         console.error('Auth error:', error);
+         return null;
+       }
+     }
     }),
     
     GoogleProvider({

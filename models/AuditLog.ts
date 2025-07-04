@@ -1,4 +1,3 @@
-// ============= models/AuditLog.ts =============
 import mongoose, { Schema, Document } from 'mongoose';
 export interface IAuditLog extends Document {
   _id: string;
