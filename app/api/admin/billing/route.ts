@@ -22,11 +22,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const plan = searchParams.get('plan') || '';
-    const status = searchParams.get('status') || '';
+    const page = parseInt(req.nextUrl.searchParams.get('page') || '1');
+    const limit = parseInt(req.nextUrl.searchParams.get('limit') || '20');
+    const plan = req.nextUrl.searchParams.get('plan') || '';
+    const status = req.nextUrl.searchParams.get('status') || '';
 
     // Build filter
     const filter: any = {};

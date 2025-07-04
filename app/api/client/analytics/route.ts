@@ -1,10 +1,9 @@
-// ============= app/api/client/analytics/route.ts =============
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import { User } from '@/models/User';
-import { URL } from '@/models/URL';
+import { URL as URLModel } from '@/models/URL'; // Rename the import
 import { AnalyticsTracker } from '@/lib/analytics';
 import { UsageMonitor } from '@/lib/usage-monitor';
 
@@ -31,10 +30,10 @@ export async function GET(req: NextRequest) {
       }, { status: 403 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const shortCode = searchParams.get('shortCode');
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
+    // Use Next.js 15 pattern for searchParams
+    const shortCode = req.nextUrl.searchParams.get('shortCode');
+    const startDate = req.nextUrl.searchParams.get('startDate');
+    const endDate = req.nextUrl.searchParams.get('endDate');
 
     let dateRange;
     if (startDate && endDate) {
@@ -46,7 +45,7 @@ export async function GET(req: NextRequest) {
 
     if (shortCode) {
       // Get analytics for specific URL
-      const url = await URL.findOne({
+      const url = await URLModel.findOne({ // Use renamed import
         shortCode,
         userId: user._id,
         isDeleted: false
@@ -73,13 +72,13 @@ export async function GET(req: NextRequest) {
       });
     } else {
       // Get analytics for all user URLs
-      const userUrls = await URL.find({
+      const userUrls = await URLModel.find({ // Use renamed import
         userId: user._id,
         isDeleted: false
       }).select('shortCode originalUrl title clicks createdAt');
 
       // Get aggregated analytics
-      const totalStats = await URL.aggregate([
+      const totalStats = await URLModel.aggregate([ // Use renamed import
         { $match: { userId: user._id, isDeleted: false } },
         {
           $group: {
@@ -92,7 +91,7 @@ export async function GET(req: NextRequest) {
       ]);
 
       // Get top performing URLs
-      const topUrls = await URL.find({
+      const topUrls = await URLModel.find({ // Use renamed import
         userId: user._id,
         isDeleted: false
       })

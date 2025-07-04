@@ -123,7 +123,7 @@ export function AnalyticsDashboard({
                 <SelectValue placeholder="Select URL" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All URLs</SelectItem>
+                <SelectItem value="all">All URLs</SelectItem>
                 {userUrls.map((url: any) => (
                   <SelectItem key={url.shortCode} value={url.shortCode}>
                     {url.title || url.shortCode}

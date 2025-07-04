@@ -17,8 +17,7 @@ export async function GET(req: NextRequest) {
 
     await connectDB();
 
-    const { searchParams } = new URL(req.url);
-    const shortCode = searchParams.get('shortCode');
+    const shortCode = req.nextUrl.searchParams.get('shortCode');
 
     if (!shortCode) {
       return NextResponse.json({ error: 'Short code is required' }, { status: 400 });
@@ -128,9 +127,8 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const shortCode = searchParams.get('shortCode');
-    const format = searchParams.get('format') || 'png';
+    const shortCode = req.nextUrl.searchParams.get('shortCode');
+    const format = req.nextUrl.searchParams.get('format') || 'png';
 
     if (!shortCode) {
       return NextResponse.json({ error: 'Short code is required' }, { status: 400 });

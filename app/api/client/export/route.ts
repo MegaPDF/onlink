@@ -21,11 +21,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const format = searchParams.get('format') || 'csv';
-    const type = searchParams.get('type') || 'urls';
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
+    const format = req.nextUrl.searchParams.get('format') || 'csv';
+    const type = req.nextUrl.searchParams.get('type') || 'urls';
+    const startDateRaw = req.nextUrl.searchParams.get('startDate');
+    const endDateRaw = req.nextUrl.searchParams.get('endDate');
+    const startDate = startDateRaw === null ? undefined : startDateRaw;
+    const endDate = endDateRaw === null ? undefined : endDateRaw;
 
     if (format === 'csv') {
       if (type === 'urls') {

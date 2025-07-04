@@ -487,7 +487,7 @@ https://example.com/page3`}
                   <SelectValue placeholder="Select folder" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No Folder</SelectItem>
+                  <SelectItem value="all">No Folder</SelectItem>
                   {folders.map((folder) => (
                     <SelectItem key={folder.id} value={folder.id}>
                       <div className="flex items-center gap-2">

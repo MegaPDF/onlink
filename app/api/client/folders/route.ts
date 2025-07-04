@@ -7,6 +7,7 @@ import { User } from '@/models/User';
 import { URL } from '@/models/URL';
 import { CreateFolderSchema } from '@/lib/validations';
 import { Folder } from '@/models/Folder';
+// Fixed app/api/client/folders/route.ts GET method
 
 export async function GET(req: NextRequest) {
   try {
@@ -48,21 +49,21 @@ export async function GET(req: NextRequest) {
       }
     ]);
 
-    // Merge stats with folders
-    // const foldersWithStats = folders.map(folder => {
-    //   const stats = folderStats.find(stat => 
-    //     stat._id.toString() === folder.id.toString()
-    //   );
+    // Merge stats with folders - UNCOMMENTED AND FIXED
+    const foldersWithStats = folders.map(folder => {
+      const stats = folderStats.find(stat => 
+        stat._id.toString() === folder.id.toString()
+      );
       
-    //   return {
-    //     ...folder,
-    //     stats: {
-    //       urlCount: stats?.urlCount || 0,
-    //       totalClicks: stats?.totalClicks || 0,
-    //       lastUpdated: new Date()
-    //     }
-    //   };
-    // });
+      return {
+        ...folder,
+        stats: {
+          urlCount: stats?.urlCount || 0,
+          totalClicks: stats?.totalClicks || 0,
+          lastUpdated: new Date()
+        }
+      };
+    });
 
     // Get uncategorized URLs count
     const uncategorizedCount = await URL.countDocuments({
@@ -85,7 +86,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// Create folder
+// ALSO NEED TO FIX THE CREATE FOLDER VALIDATION ISSUE
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -96,6 +97,12 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
+    
+    // Fix the parentId null issue
+    if (body.parentId === null || body.parentId === "" || body.parentId === undefined) {
+      delete body.parentId;
+    }
+
     const validatedData = CreateFolderSchema.parse(body);
 
     const user = await User.findById(session.user.id);
@@ -151,7 +158,7 @@ export async function POST(req: NextRequest) {
       icon: validatedData.icon,
       userId: user._id,
       teamId: user.team?.teamId,
-      parentId: validatedData.parentId,
+      parentId: validatedData.parentId || null, // Explicitly set to null if undefined
       path,
       level,
       isShared: false,
@@ -176,7 +183,7 @@ export async function POST(req: NextRequest) {
     if (error === 'ZodError') {
       return NextResponse.json({ 
         error: 'Invalid input data',
-        details: error 
+        details: error
       }, { status: 400 });
     }
 
@@ -260,9 +267,8 @@ export async function DELETE(req: NextRequest) {
 
     await connectDB();
 
-    const { searchParams } = new URL(req.url);
-    const folderId = searchParams.get('folderId');
-    const moveToFolder = searchParams.get('moveToFolder'); // Optional: move URLs to another folder
+    const folderId = req.nextUrl.searchParams.get('folderId');
+    const moveToFolder = req.nextUrl.searchParams.get('moveToFolder'); // Optional: move URLs to another folder
 
     if (!folderId) {
       return NextResponse.json({ error: 'Folder ID is required' }, { status: 400 });

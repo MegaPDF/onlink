@@ -450,7 +450,7 @@ export function LinksTable({
                 <SelectValue placeholder="All Folders" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Folders</SelectItem>
+                <SelectItem value="all">All Folders</SelectItem>
                 <SelectItem value="null">Uncategorized</SelectItem>
                 {folders.map((folder) => (
                   <SelectItem key={folder._id} value={folder._id}>
@@ -473,7 +473,7 @@ export function LinksTable({
                 <SelectValue placeholder="All Tags" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Tags</SelectItem>
+                <SelectItem value="all">All Tags</SelectItem>
                 {tags.map((tag) => (
                   <SelectItem key={tag} value={tag}>
                     <div className="flex items-center gap-2">

@@ -13,7 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Shield, LogOut, User, ArrowLeft, Menu } from "lucide-react";
+import { Shield, LogOut, User, ArrowLeft, Menu, Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 
 interface AdminHeaderProps {
   onMenuClick?: () => void;
@@ -25,10 +26,16 @@ export function AdminHeader({
   showMobileMenu = true,
 }: AdminHeaderProps) {
   const { user, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
+
+  const toggleTheme = () => {
+    setTheme(theme === "dark" ? "light" : "dark");
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 items-center justify-between px-4">
+        
+      <div className="container flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Left section */}
         <div className="flex items-center gap-4">
           {/* Mobile menu button */}
@@ -36,50 +43,51 @@ export function AdminHeader({
             <Button
               variant="ghost"
               size="icon"
-              className="md:hidden"
+              className="md:hidden hover:bg-accent transition-colors"
               onClick={onMenuClick}
+              aria-label="Toggle menu"
             >
               <Menu className="h-5 w-5" />
             </Button>
           )}
-
-          {/* Logo & Title */}
-          <div className="flex items-center gap-3">
-            <Link href="/admin" className="flex items-center space-x-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-600 text-white">
-                <Shield className="h-4 w-4" />
-              </div>
-              <span className="hidden font-bold sm:inline-block text-red-600">
-                Admin Panel
-              </span>
-            </Link>
-          </div>
-
-          {/* Back to Dashboard */}
-          <Link href="/dashboard">
-            <Button variant="outline" size="sm" className="hidden md:flex">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Dashboard
-            </Button>
-          </Link>
         </div>
 
         {/* Right section */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* Theme toggle */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            className="hover:bg-accent transition-colors"
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? (
+              <Sun className="h-5 w-5" />
+            ) : (
+              <Moon className="h-5 w-5" />
+            )}
+          </Button>
+
+          {/* User dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                <Avatar className="h-8 w-8">
+              <Button
+                variant="ghost"
+                className="relative h-9 w-9 rounded-full hover:bg-accent transition-colors"
+                aria-label="User menu"
+              >
+                <Avatar className="h-9 w-9">
                   <AvatarImage src={user?.image || ""} alt={user?.name || ""} />
-                  <AvatarFallback>
+                  <AvatarFallback className="bg-red-100 text-red-800">
                     {user?.name?.charAt(0) || "A"}
                   </AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
+            <DropdownMenuContent className="w-60 p-2" align="end" forceMount>
               <DropdownMenuLabel className="font-normal">
-                <div className="flex flex-col space-y-1">
+                <div className="flex flex-col space-y-2 p-2">
                   <p className="text-sm font-medium leading-none">
                     {user?.name}
                   </p>
@@ -87,21 +95,27 @@ export function AdminHeader({
                     {user?.email}
                   </p>
                   <div className="flex items-center gap-2 mt-2">
-                    <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">
+                    <span className="text-xs bg-red-100 text-red-800 px-2.5 py-1 rounded-full">
                       Administrator
                     </span>
                   </div>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/dashboard/profile">
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link
+                  href="/dashboard/profile"
+                  className="flex items-center p-2"
+                >
                   <User className="mr-2 h-4 w-4" />
                   <span>Profile</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => logout()}>
+              <DropdownMenuItem
+                onClick={() => logout()}
+                className="cursor-pointer p-2"
+              >
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Log out</span>
               </DropdownMenuItem>

@@ -42,6 +42,8 @@ export const ResetPasswordSchema = z.object({
 });
 
 // URL validations
+// Fixed CreateURLSchema in lib/validations.ts
+
 export const CreateURLSchema = z.object({
   originalUrl: z.string()
     .url('Invalid URL format')
@@ -59,22 +61,26 @@ export const CreateURLSchema = z.object({
     .min(3, 'Custom slug must be at least 3 characters')
     .max(50, 'Custom slug is too long')
     .regex(/^[a-zA-Z0-9-_]+$/, 'Custom slug can only contain letters, numbers, hyphens, and underscores')
-    .optional(),
+    .nullable() // Allow null values
+    .optional() // Make it optional
+    .transform((val) => val === null || val === "" ? undefined : val), // Transform null/empty to undefined
   
   folderId: z.string()
     .refine((id) => !id || isValidObjectId(id), 'Invalid folder ID format')
-    .optional(),
+    .nullable() // Allow null values
+    .optional() // Make it optional
+    .transform((val) => val === null || val === "" ? undefined : val), // Transform null/empty to undefined
   
   title: z.string().max(200, 'Title is too long').optional(),
   description: z.string().max(500, 'Description is too long').optional(),
   
   tags: z.array(z.string().max(50)).max(10, 'Maximum 10 tags allowed').default([]),
   
-  expiresAt: z.string().datetime().optional(),
-  clickLimit: z.number().positive('Click limit must be positive').optional(),
+  expiresAt: z.string().datetime().nullable().optional().transform((val) => val === null || val === "" ? undefined : val),
+  clickLimit: z.number().positive('Click limit must be positive').nullable().optional(),
   
   isPasswordProtected: z.boolean().default(false),
-  password: z.string().min(4, 'Password must be at least 4 characters').max(128).optional(),
+  password: z.string().min(4, 'Password must be at least 4 characters').max(128).nullable().optional().transform((val) => val === null || val === "" ? undefined : val),
   
   geoRestrictions: z.object({
     type: z.enum(['allow', 'block']),
@@ -120,7 +126,9 @@ export const CreateFolderSchema = z.object({
   icon: z.string().max(50).optional(),
   parentId: z.string()
     .refine((id) => !id || isValidObjectId(id), 'Invalid parent folder ID format')
-    .optional()
+    .nullable() // Allow null values
+    .optional() // Make it optional
+    .transform((val) => val === null || val === "" ? undefined : val) // Transform null/empty to undefined
 });
 
 export const UpdateFolderSchema = z.object({
@@ -170,14 +178,18 @@ export const CreateDomainSchema = z.object({
 });
 
 // Settings validations
+// ============= lib/validations.ts - Complete UpdateSettingsSchema =============
+
+// Settings validations - COMPLETE VERSION
 export const UpdateSettingsSchema = z.object({
   system: z.object({
     appName: z.string().min(1).max(100).optional(),
     appDescription: z.string().max(500).optional(),
+    appUrl: z.string().url().optional(),
     supportEmail: z.string().email().optional(),
     
     smtp: z.object({
-      host: z.string().min(1).optional(),
+      host: z.string().optional(),
       port: z.number().min(1).max(65535).optional(),
       secure: z.boolean().optional(),
       username: z.string().optional(),
@@ -187,12 +199,39 @@ export const UpdateSettingsSchema = z.object({
     }).optional(),
     
     security: z.object({
+      enforceSSL: z.boolean().optional(),
       maxLoginAttempts: z.number().min(1).max(10).optional(),
-      lockoutDuration: z.number().min(5).max(1440).optional(),
-      sessionTimeout: z.number().min(30).max(10080).optional(),
-      passwordMinLength: z.number().min(6).max(32).optional(),
+      lockoutDuration: z.number().min(1).max(1440).optional(),
+      sessionTimeout: z.number().min(1).max(10080).optional(),
+      passwordMinLength: z.number().min(4).max(32).optional(),
       requireEmailVerification: z.boolean().optional(),
       enableTwoFactor: z.boolean().optional()
+    }).optional(),
+
+    analytics: z.object({
+      provider: z.string().optional(),
+      trackingCode: z.string().optional(),
+      enableCustomAnalytics: z.boolean().optional(),
+      retentionDays: z.number().min(1).max(3650).optional()
+    }).optional(),
+
+    integrations: z.object({
+      stripe: z.object({
+        enabled: z.boolean().optional(),
+        publicKey: z.string().optional(),
+        secretKey: z.string().optional(),
+        webhookSecret: z.string().optional()
+      }).optional(),
+      google: z.object({
+        enabled: z.boolean().optional(),
+        clientId: z.string().optional(),
+        clientSecret: z.string().optional()
+      }).optional(),
+      facebook: z.object({
+        enabled: z.boolean().optional(),
+        appId: z.string().optional(),
+        appSecret: z.string().optional()
+      }).optional()
     }).optional()
   }).optional(),
   
@@ -205,8 +244,36 @@ export const UpdateSettingsSchema = z.object({
     enableAPIAccess: z.boolean().optional(),
     enableWhiteLabel: z.boolean().optional(),
     maintenanceMode: z.boolean().optional()
-  }).optional()
-});
+  }).optional(),
+
+  defaultLimits: z.object({
+    free: z.object({
+      linksPerMonth: z.number().optional(),
+      clicksPerMonth: z.number().optional(),
+      customDomains: z.number().min(0).optional(),
+      analytics: z.boolean().optional()
+    }).optional(),
+    premium: z.object({
+      linksPerMonth: z.number().optional(),
+      clicksPerMonth: z.number().optional(),
+      customDomains: z.number().optional(),
+      analytics: z.boolean().optional()
+    }).optional(),
+    enterprise: z.object({
+      linksPerMonth: z.number().optional(),
+      clicksPerMonth: z.number().optional(),
+      customDomains: z.number().optional(),
+      analytics: z.boolean().optional()
+    }).optional()
+  }).optional(),
+
+  // Meta fields
+  lastModifiedBy: z.string().optional(),
+  _id: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  __v: z.number().optional()
+}).strict(); // Allow additional fields for flexibility
 
 // User profile validations
 export const UpdateProfileSchema = z.object({

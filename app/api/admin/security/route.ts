@@ -20,14 +20,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '50');
-    const riskLevel = searchParams.get('riskLevel') || '';
-    const action = searchParams.get('action') || '';
-    const userId = searchParams.get('userId') || '';
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
+    const page = parseInt(req.nextUrl.searchParams.get('page') || '1');
+    const limit = parseInt(req.nextUrl.searchParams.get('limit') || '50');
+    const riskLevel = req.nextUrl.searchParams.get('riskLevel') || '';
+    const action = req.nextUrl.searchParams.get('action') || '';
+    const userId = req.nextUrl.searchParams.get('userId') || '';
+    const startDate = req.nextUrl.searchParams.get('startDate');
+    const endDate = req.nextUrl.searchParams.get('endDate');
 
     // Build filter
     const filter: any = {};

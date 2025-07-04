@@ -64,10 +64,31 @@ export function useAnalytics({
       }
 
       const result = await response.json();
-      setData(result.data.analytics || result.data);
+      const analyticsData = result.data.analytics || result.data;
+      
+      // Ensure all required arrays exist with default values
+      const normalizedData = {
+        totalClicks: analyticsData?.totalClicks || 0,
+        uniqueClicks: analyticsData?.uniqueClicks || 0,
+        dailyStats: Array.isArray(analyticsData?.dailyStats) ? analyticsData.dailyStats : [],
+        geography: Array.isArray(analyticsData?.geography) ? analyticsData.geography : [],
+        devices: Array.isArray(analyticsData?.devices) ? analyticsData.devices : [],
+        referrers: Array.isArray(analyticsData?.referrers) ? analyticsData.referrers : []
+      };
+      
+      setData(normalizedData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
       console.error('Analytics fetch error:', err);
+      // Set empty data structure on error to prevent undefined access
+      setData({
+        totalClicks: 0,
+        uniqueClicks: 0,
+        dailyStats: [],
+        geography: [],
+        devices: [],
+        referrers: []
+      });
     } finally {
       setIsLoading(false);
     }
@@ -162,7 +183,7 @@ export function useAnalytics({
     });
   }, [updateFilters]);
 
-  // Calculated metrics - FIXED date handling
+  // Calculated metrics - FIXED with null checks and safe array access
   const metrics = useMemo(() => {
     if (!data) return null;
 
@@ -171,26 +192,42 @@ export function useAnalytics({
     const totalDays = Math.max(1, Math.ceil((endTime - startTime) / (1000 * 60 * 60 * 24)));
     const averageClicksPerDay = Math.round(data.totalClicks / totalDays);
     
-    // Calculate growth (comparing to previous period)
-    const halfLength = Math.floor(data.dailyStats.length / 2);
-    const previousPeriodClicks = data.dailyStats.slice(0, halfLength)
-      .reduce((sum, day) => sum + day.clicks, 0);
-    const currentPeriodClicks = data.dailyStats.slice(halfLength)
-      .reduce((sum, day) => sum + day.clicks, 0);
-    
-    const growth = previousPeriodClicks > 0 
-      ? ((currentPeriodClicks - previousPeriodClicks) / previousPeriodClicks) * 100 
-      : 0;
+    // Calculate growth (comparing to previous period) - SAFE array access
+    let growth = 0;
+    if (data.dailyStats && Array.isArray(data.dailyStats) && data.dailyStats.length > 0) {
+      const halfLength = Math.floor(data.dailyStats.length / 2);
+      const previousPeriodClicks = data.dailyStats.slice(0, halfLength)
+        .reduce((sum, day) => sum + (day?.clicks || 0), 0);
+      const currentPeriodClicks = data.dailyStats.slice(halfLength)
+        .reduce((sum, day) => sum + (day?.clicks || 0), 0);
+      
+      growth = previousPeriodClicks > 0 
+        ? ((currentPeriodClicks - previousPeriodClicks) / previousPeriodClicks) * 100 
+        : 0;
+    }
+
+    // Safe access to array elements with fallbacks
+    const topCountry = (data.geography && Array.isArray(data.geography) && data.geography.length > 0) 
+      ? data.geography[0]?.country || 'N/A' 
+      : 'N/A';
+      
+    const topDevice = (data.devices && Array.isArray(data.devices) && data.devices.length > 0) 
+      ? data.devices[0]?.type || 'N/A' 
+      : 'N/A';
+      
+    const topReferrer = (data.referrers && Array.isArray(data.referrers) && data.referrers.length > 0) 
+      ? data.referrers[0]?.domain || 'Direct' 
+      : 'Direct';
 
     return {
-      totalClicks: data.totalClicks,
-      uniqueClicks: data.uniqueClicks,
+      totalClicks: data.totalClicks || 0,
+      uniqueClicks: data.uniqueClicks || 0,
       clickRate: data.uniqueClicks > 0 ? (data.totalClicks / data.uniqueClicks) : 0,
       averageClicksPerDay,
       growth: Math.round(growth * 100) / 100,
-      topCountry: data.geography[0]?.country || 'N/A',
-      topDevice: data.devices[0]?.type || 'N/A',
-      topReferrer: data.referrers[0]?.domain || 'Direct'
+      topCountry,
+      topDevice,
+      topReferrer
     };
   }, [data, filters]);
 

@@ -21,6 +21,13 @@ export async function POST(req: NextRequest) {
     await connectDB();
 
     const body = await req.json();
+    if (body.customSlug === null || body.customSlug === "" || body.customSlug === undefined) {
+      delete body.customSlug;
+    }
+    if (body.folderId === null || body.folderId === "" || body.folderId === undefined) {
+      delete body.folderId;
+    }
+    
     const validatedData = CreateURLSchema.parse(body);
 
     // Get user and check permissions
