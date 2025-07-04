@@ -1,9 +1,9 @@
-// ============= lib/analytics.ts =============
-import geoip from 'geoip-lite';
+
 import { Analytics } from '@/models/Analytics';
 import { URL as URLModel } from '@/models/URL';
 import { nanoid } from 'nanoid';
 import { hashData, parseUserAgent } from './utils';
+import geoip from 'geoip-lite';
 
 export class AnalyticsTracker {
   

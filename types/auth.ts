@@ -28,6 +28,10 @@ export interface AuthUser {
     role: 'owner' | 'admin' | 'member' | 'viewer';
     joinedAt: Date;
   };
+    usage?: {
+    monthlyLinks?: number;
+    monthlyClicks?: number;
+  };
 }
 
 export interface SessionData {

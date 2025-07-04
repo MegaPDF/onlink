@@ -18,7 +18,7 @@ export class EmailService {
       throw new Error('SMTP configuration not found');
     }
     
-    this.transporter = nodemailer.createTransporter({
+    this.transporter = nodemailer.createTransport({
       host: smtpConfig.host,
       port: smtpConfig.port,
       secure: smtpConfig.secure,
