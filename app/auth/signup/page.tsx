@@ -54,7 +54,13 @@ export default function SignUpPage() {
     acceptTerms: false,
   });
 
-  const [errors, setErrors] = useState<Partial<SignupFormData>>({});
+  const [errors, setErrors] = useState<Record<keyof SignupFormData, string | undefined>>({
+    name: undefined,
+    email: undefined,
+    password: undefined,
+    confirmPassword: undefined,
+    acceptTerms: undefined,
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -103,11 +109,17 @@ export default function SignUpPage() {
   const validateForm = (): boolean => {
     try {
       SignupSchema.parse(formData);
-      setErrors({});
+      setErrors({
+        name: undefined,
+        email: undefined,
+        password: undefined,
+        confirmPassword: undefined,
+        acceptTerms: undefined,
+      });
       return true;
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const newErrors: Partial<SignupFormData> = {};
+        const newErrors: Record<keyof SignupFormData, string | undefined> = {} as Record<keyof SignupFormData, string | undefined>;
         error.errors.forEach((err) => {
           if (err.path[0]) {
             newErrors[err.path[0] as keyof SignupFormData] = err.message;
