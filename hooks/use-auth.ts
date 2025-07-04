@@ -1,4 +1,4 @@
-// ============= hooks/use-auth.ts =============
+// ============= Fixed hooks/use-auth.ts =============
 import { useSession, signIn, signOut } from 'next-auth/react';
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -109,20 +109,45 @@ export function useAuth() {
     }
   }, [router, toast]);
 
-  // Logout
+  // ============= FIXED LOGOUT FUNCTION =============
   const logout = useCallback(async () => {
     setIsLoading(true);
     
     try {
-      await signOut({ redirect: false });
+      // Clear the session completely
+      await signOut({ 
+        redirect: false,
+        callbackUrl: '/'
+      });
+      
+      // Force session refresh to ensure component re-renders
+      await update();
+      
+      // Small delay to ensure session is cleared
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       toast.success('Logged out successfully');
+      
+      // Force navigation and page refresh
       router.push('/');
+      router.refresh();
+      
+      // Force window reload as last resort to clear all state
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 200);
+      
     } catch (error) {
+      console.error('Logout error:', error);
       toast.error('Logout failed');
+      
+      // Even if there's an error, try to clear local state
+      router.push('/');
+      router.refresh();
     } finally {
       setIsLoading(false);
     }
-  }, [router, toast]);
+  }, [router, toast, update]);
 
   // Request password reset
   const requestPasswordReset = useCallback(async (data: PasswordResetRequest) => {
@@ -182,14 +207,14 @@ export function useAuth() {
   }, [router, toast]);
 
   // Update profile
-  const updateProfile = useCallback(async (profileData: Partial<AuthUser>) => {
+  const updateProfile = useCallback(async (data: any) => {
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/user/profile', {
+      const response = await fetch('/api/client/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profileData)
+        body: JSON.stringify(data)
       });
 
       const result = await response.json();
@@ -199,31 +224,26 @@ export function useAuth() {
         return { success: false, error: result.message };
       }
 
-      // Update session with new data
-      await update({
-        ...session,
-        user: { ...session?.user, ...result.user }
-      });
-
-      toast.updateSuccess('Profile updated successfully');
-      return { success: true, data: result.user };
+      await update();
+      toast.success('Profile updated successfully');
+      return { success: true };
     } catch (error) {
       toast.serverError();
       return { success: false, error: 'Network error' };
     } finally {
       setIsLoading(false);
     }
-  }, [session, update, toast]);
+  }, [toast, update]);
 
   // Change password
-  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+  const changePassword = useCallback(async (data: any) => {
     setIsLoading(true);
     
     try {
-      const response = await fetch('/api/user/change-password', {
-        method: 'POST',
+      const response = await fetch('/api/client/profile/password', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword, newPassword })
+        body: JSON.stringify(data)
       });
 
       const result = await response.json();

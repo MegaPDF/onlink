@@ -1,3 +1,4 @@
+// ============= Enhanced components/providers.tsx =============
 "use client";
 
 import React from "react";
@@ -13,10 +14,12 @@ interface ProvidersProps {
 export function Providers({ children }: ProvidersProps) {
   return (
     <SessionProvider
-      // Re-fetch session every 5 minutes
-      refetchInterval={5 * 60}
+      // Re-fetch session every 2 minutes for faster logout detection
+      refetchInterval={2 * 60}
       // Re-fetch session when window is focused
       refetchOnWindowFocus={true}
+      // Enable base URL for proper session handling
+      basePath="/api/auth"
     >
       <ThemeProvider
         attribute="class"

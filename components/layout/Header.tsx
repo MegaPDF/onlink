@@ -1,7 +1,7 @@
-// ============= components/layout/header.tsx =============
+// ============= Fixed components/layout/Header.tsx =============
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
@@ -38,16 +38,27 @@ interface HeaderProps {
 }
 
 export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, status } = useAuth();
   const router = useRouter();
   const toast = useToast();
 
+  // Debug logging (remove in production)
+  useEffect(() => {
+    console.log("Header state changed:", {
+      isAuthenticated,
+      status,
+      userId: user?.id,
+      userName: user?.name,
+    });
+  }, [isAuthenticated, status, user]);
+
   const handleLogout = async () => {
     try {
+      console.log("Logout initiated...");
       await logout();
-      toast.success("Logged out successfully");
-      router.push("/");
+      console.log("Logout completed");
     } catch (error) {
+      console.error("Logout error in header:", error);
       toast.error("Logout failed");
     }
   };
@@ -74,8 +85,14 @@ export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
     }
   };
 
+  // Force re-render when authentication status changes
+  const authKey = `${isAuthenticated}-${status}-${user?.id || "guest"}`;
+
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header
+      key={authKey}
+      className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+    >
       <div className="container flex h-16 items-center justify-between px-4">
         {/* Left section */}
         <div className="flex items-center gap-4">
@@ -143,7 +160,7 @@ export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
 
         {/* Right section */}
         <div className="flex items-center gap-2">
-          {isAuthenticated ? (
+          {isAuthenticated && status === "authenticated" && user ? (
             <>
               {/* Search (Desktop) */}
               <Button variant="ghost" size="icon" className="hidden md:flex">
@@ -186,7 +203,10 @@ export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
                         >
                           <div className="flex items-center gap-1">
                             {getPlanIcon(user?.plan || "free")}
-                            {(user?.plan ? user.plan.charAt(0).toUpperCase() + user.plan.slice(1) : "Free")}
+                            {user?.plan
+                              ? user.plan.charAt(0).toUpperCase() +
+                                user.plan.slice(1)
+                              : "Free"}
                           </div>
                         </Badge>
                         {user?.team && (
