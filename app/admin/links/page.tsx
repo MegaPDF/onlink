@@ -95,14 +95,19 @@ interface LinksPageData {
   };
 }
 
+// Define special "all" values to replace empty strings
+const ALL_LINKS_STATUS = "all_links_status";
+const ALL_USERS = "all_users";
+const ALL_DOMAINS = "all_domains";
+
 export default function AdminLinksPage() {
   const [data, setData] = useState<LinksPageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
-    userId: "",
-    domain: "",
-    status: "",
+    userId: ALL_USERS,
+    domain: ALL_DOMAINS,
+    status: ALL_LINKS_STATUS,
     sortBy: "createdAt",
     sortOrder: "desc",
   });
@@ -117,7 +122,12 @@ export default function AdminLinksPage() {
           page: page.toString(),
           limit: "20",
           search: searchTerm,
-          ...filters,
+          // Convert special "all" values back to empty strings for API
+          userId: filters.userId === ALL_USERS ? "" : filters.userId,
+          domain: filters.domain === ALL_DOMAINS ? "" : filters.domain,
+          status: filters.status === ALL_LINKS_STATUS ? "" : filters.status,
+          sortBy: filters.sortBy,
+          sortOrder: filters.sortOrder,
         });
 
         const response = await fetch(`/api/admin/links?${params}`);
@@ -131,7 +141,7 @@ export default function AdminLinksPage() {
         setCurrentPage(page);
       } catch (error) {
         console.error("Error fetching links:", error);
-        toast.error("Failed to load links");
+        toast.error("Failed to load links. Please try again.");
       } finally {
         setLoading(false);
       }
@@ -141,7 +151,17 @@ export default function AdminLinksPage() {
 
   useEffect(() => {
     fetchLinks(1);
-  }, [fetchLinks]);
+  }, []);
+
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (searchTerm !== undefined) {
+        fetchLinks(1);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayedSearch);
+  }, [searchTerm, filters]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,123 +170,120 @@ export default function AdminLinksPage() {
 
   const handleDeleteLink = async (urlId: string) => {
     try {
-      const response = await fetch(`/api/admin/links?urlId=${urlId}`, {
+      const response = await fetch(`/api/admin/links?linkId=${urlId}`, {
         method: "DELETE",
       });
 
-      const result = await response.json();
-
       if (!response.ok) {
-        throw new Error(result.error || "Failed to delete link");
+        throw new Error("Failed to delete link");
       }
 
-      toast.success("Link deleted successfully");
+      toast.success("Link deleted successfully.");
+
       fetchLinks(currentPage);
     } catch (error) {
       console.error("Error deleting link:", error);
-      toast.error("Failed to delete link");
+      toast.error("Failed to delete link. Please try again.");
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
-  };
-
-  const getStatusBadgeVariant = (url: URLData) => {
-    if (!url.isActive) return "secondary";
-    if (url.expiresAt && new Date(url.expiresAt) < new Date())
-      return "destructive";
-    return "default";
-  };
-
-  const getStatusText = (url: URLData) => {
-    if (!url.isActive) return "Inactive";
-    if (url.expiresAt && new Date(url.expiresAt) < new Date()) return "Expired";
-    return "Active";
+  const getStatusBadge = (isActive: boolean, expiresAt?: Date) => {
+    if (expiresAt && new Date(expiresAt) < new Date()) {
+      return <Badge variant="destructive">Expired</Badge>;
+    }
+    return isActive ? (
+      <Badge variant="default" className="bg-green-100 text-green-800">
+        Active
+      </Badge>
+    ) : (
+      <Badge variant="secondary">Inactive</Badge>
+    );
   };
 
   if (loading && !data) {
     return (
-      <div className="container mx-auto py-6 px-4">
-        <div className="flex items-center justify-center min-h-96">
-          <LoadingSpinner size="lg" />
-        </div>
+      <div className="flex items-center justify-center h-96">
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">Link Management</h1>
-          <p className="text-muted-foreground">Monitor all platform links</p>
-        </div>
-        <Button onClick={() => fetchLinks(currentPage)}>
-          <LinkIcon className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold">Links</h1>
+        <p className="text-muted-foreground">
+          Manage all shortened links across the platform
+        </p>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Links</CardTitle>
-            <LinkIcon className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.totalUrls || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Links</CardTitle>
-            <Eye className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.activeUrls || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Clicks</CardTitle>
-            <MousePointer className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.totalClicks || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Created Today</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.urlsToday || 0)}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {data?.stats && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Links</CardTitle>
+              <LinkIcon className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.totalUrls)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Active Links
+              </CardTitle>
+              <Eye className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.activeUrls)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total Clicks
+              </CardTitle>
+              <MousePointer className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.totalClicks)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Links Today</CardTitle>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.urlsToday)}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filters */}
-      <Card className="mb-6">
-        <CardContent className="p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Search & Filter</CardTitle>
+        </CardHeader>
+        <CardContent>
           <form onSubmit={handleSearch} className="flex gap-4">
             <div className="flex-1">
               <Input
                 placeholder="Search links by URL, title, or short code..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full"
               />
             </div>
             <Select
@@ -275,11 +292,11 @@ export default function AdminLinksPage() {
                 setFilters((prev) => ({ ...prev, status: value }))
               }
             >
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
+                <SelectItem value={ALL_LINKS_STATUS}>All Status</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
                 <SelectItem value="expired">Expired</SelectItem>
@@ -314,97 +331,66 @@ export default function AdminLinksPage() {
                     <TableHead>Status</TableHead>
                     <TableHead>Clicks</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="w-12"></TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data?.urls.map((url) => (
                     <TableRow key={url._id}>
                       <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <code className="px-2 py-1 bg-muted rounded text-sm font-mono">
-                              {url.domain}/{url.shortCode}
-                            </code>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6"
-                              onClick={() =>
-                                copyToClipboard(
-                                  `https://${url.domain}/${url.shortCode}`
-                                )
-                              }
-                            >
-                              <Copy className="h-3 w-3" />
-                            </Button>
-                          </div>
-                          <p className="text-sm text-muted-foreground max-w-md truncate">
+                        <div className="max-w-xs">
+                          <div className="font-medium truncate">
                             {url.title || url.originalUrl}
-                          </p>
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {url.domain}/{url.shortCode}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
                         <div>
-                          <p className="font-medium">{url.userId.name}</p>
-                          <p className="text-sm text-muted-foreground">
+                          <div className="font-medium">{url.userId.name}</div>
+                          <div className="text-sm text-muted-foreground">
                             {url.userId.email}
-                          </p>
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getStatusBadgeVariant(url)}>
-                          {getStatusText(url)}
-                        </Badge>
+                        {getStatusBadge(url.isActive, url.expiresAt)}
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">
-                          <p className="font-medium">
-                            {formatNumber(url.clicks.total)}
-                          </p>
-                          <p className="text-muted-foreground">
+                          <div>{formatNumber(url.clicks.total)} total</div>
+                          <div className="text-muted-foreground">
                             {formatNumber(url.clicks.unique)} unique
-                          </p>
+                          </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatRelativeTime(url.createdAt)}
+                      <TableCell>
+                        <div className="text-sm">
+                          {formatRelativeTime(url.createdAt)}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" className="h-8 w-8 p-0">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                window.open(
-                                  `https://${url.domain}/${url.shortCode}`,
-                                  "_blank"
-                                )
-                              }
-                            >
+                            <DropdownMenuItem>
                               <ExternalLink className="mr-2 h-4 w-4" />
-                              Visit Link
+                              Open Link
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                copyToClipboard(
-                                  `https://${url.domain}/${url.shortCode}`
-                                )
-                              }
-                            >
+                            <DropdownMenuItem>
                               <Copy className="mr-2 h-4 w-4" />
-                              Copy URL
+                              Copy Short URL
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => copyToClipboard(url.originalUrl)}
-                            >
-                              <Copy className="mr-2 h-4 w-4" />
-                              Copy Original
+                            <DropdownMenuItem>
+                              <BarChart3 className="mr-2 h-4 w-4" />
+                              View Analytics
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <AlertDialog>
@@ -447,31 +433,30 @@ export default function AdminLinksPage() {
               </Table>
 
               {/* Pagination */}
-              {data && data.pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between mt-6">
-                  <p className="text-sm text-muted-foreground">
-                    Showing{" "}
-                    {(data.pagination.page - 1) * data.pagination.limit + 1} to{" "}
-                    {Math.min(
-                      data.pagination.page * data.pagination.limit,
-                      data.pagination.total
-                    )}{" "}
-                    of {data.pagination.total} links
-                  </p>
-                  <div className="flex gap-2">
+              {data?.pagination && data.pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between space-x-2 py-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * 20 + 1} to{" "}
+                    {Math.min(currentPage * 20, data.pagination.total)} of{" "}
+                    {data.pagination.total} links
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchLinks(currentPage - 1)}
-                      disabled={!data.pagination.hasPrevPage || loading}
+                      disabled={!data.pagination.hasPrevPage}
                     >
                       Previous
                     </Button>
+                    <div className="text-sm">
+                      Page {currentPage} of {data.pagination.totalPages}
+                    </div>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchLinks(currentPage + 1)}
-                      disabled={!data.pagination.hasNextPage || loading}
+                      disabled={!data.pagination.hasNextPage}
                     >
                       Next
                     </Button>

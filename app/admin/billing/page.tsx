@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
-import { useToast } from "@/hooks/use-toast";
 import {
   Table,
   TableBody,
@@ -51,6 +50,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { formatRelativeTime, formatNumber, formatCurrency } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface SubscriptionData {
   _id: string;
@@ -104,19 +104,23 @@ interface BillingPageData {
   };
 }
 
+// Define special "all" values to replace empty strings
+const ALL_BILLING_PLANS = "all_billing_plans";
+const ALL_BILLING_STATUSES = "all_billing_statuses";
+const ALL_INTERVALS = "all_intervals";
+
 export default function AdminBillingPage() {
   const [data, setData] = useState<BillingPageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
-    plan: "",
-    status: "",
+    plan: ALL_BILLING_PLANS,
+    status: ALL_BILLING_STATUSES,
+    interval: ALL_INTERVALS,
     sortBy: "createdAt",
     sortOrder: "desc",
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const toast = useToast();
-
   const fetchBilling = useCallback(
     async (page = 1) => {
       try {
@@ -125,188 +129,175 @@ export default function AdminBillingPage() {
           page: page.toString(),
           limit: "20",
           search: searchTerm,
-          ...filters,
+          // Convert special "all" values back to empty strings for API
+          plan: filters.plan === ALL_BILLING_PLANS ? "" : filters.plan,
+          status: filters.status === ALL_BILLING_STATUSES ? "" : filters.status,
+          interval: filters.interval === ALL_INTERVALS ? "" : filters.interval,
+          sortBy: filters.sortBy,
+          sortOrder: filters.sortOrder,
         });
 
-        const response = await fetch(`/api/admin/billing?${params}`);
-        const result = await response.json();
-
+        const response = await fetch(`/api/admin/billing?${params.toString()}`);
         if (!response.ok) {
-          throw new Error(result.error || "Failed to fetch billing data");
+          throw new Error("Failed to fetch billing data");
         }
 
+        const result = await response.json();
         setData(result.data);
         setCurrentPage(page);
       } catch (error) {
-        console.error("Error fetching billing data:", error);
-        toast.error("Failed to load billing data");
+        console.error("Error fetching billing:", error);
+        toast("Failed to fetch billing data. Please try again.");
       } finally {
         setLoading(false);
       }
     },
-    [searchTerm, filters, toast]
+    [searchTerm, filters]
   );
-
-  useEffect(() => {
-    fetchBilling(1);
-  }, [fetchBilling]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchBilling(1);
   };
 
-  const handleCancelSubscription = async (subscriptionId: string) => {
-    try {
-      const response = await fetch("/api/admin/billing/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscriptionId }),
-      });
+  useEffect(() => {
+    fetchBilling();
+  }, []);
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to cancel subscription");
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (searchTerm !== undefined) {
+        fetchBilling(1);
       }
+    }, 500);
 
-      toast.success("Subscription canceled successfully");
-      fetchBilling(currentPage);
-    } catch (error) {
-      console.error("Error canceling subscription:", error);
-      toast.error("Failed to cancel subscription");
+    return () => clearTimeout(delayedSearch);
+  }, [searchTerm, filters]);
+
+  const getPlanBadge = (plan: string) => {
+    switch (plan) {
+      case "free":
+        return <Badge variant="secondary">Free</Badge>;
+      case "premium":
+        return <Badge variant="default">Premium</Badge>;
+      case "enterprise":
+        return <Badge variant="destructive">Enterprise</Badge>;
+      case "team":
+        return <Badge variant="outline">Team</Badge>;
+      default:
+        return <Badge variant="outline">{plan}</Badge>;
     }
   };
 
-  const getStatusBadgeVariant = (status: string) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case "active":
-        return "default";
+        return (
+          <Badge variant="default" className="bg-green-100 text-green-800">
+            Active
+          </Badge>
+        );
       case "trialing":
-        return "secondary";
-      case "past_due":
-        return "destructive";
+        return (
+          <Badge variant="default" className="bg-blue-100 text-blue-800">
+            Trial
+          </Badge>
+        );
       case "canceled":
-        return "outline";
+        return <Badge variant="secondary">Canceled</Badge>;
+      case "past_due":
+        return <Badge variant="destructive">Past Due</Badge>;
+      case "unpaid":
+        return <Badge variant="destructive">Unpaid</Badge>;
       default:
-        return "secondary";
-    }
-  };
-
-  const getPlanBadgeVariant = (plan: string) => {
-    switch (plan) {
-      case "enterprise":
-        return "default";
-      case "premium":
-        return "secondary";
-      case "team":
-        return "outline";
-      default:
-        return "outline";
+        return <Badge variant="outline">{status}</Badge>;
     }
   };
 
   if (loading && !data) {
     return (
-      <div className="container mx-auto py-6 px-4">
-        <div className="flex items-center justify-center min-h-96">
-          <LoadingSpinner size="lg" />
-        </div>
+      <div className="flex items-center justify-center h-96">
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">Billing Overview</h1>
-          <p className="text-muted-foreground">
-            Revenue, subscriptions, and billing analytics
-          </p>
-        </div>
-        <Button onClick={() => fetchBilling(currentPage)}>
-          <CreditCard className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold">Billing & Subscriptions</h1>
+        <p className="text-muted-foreground">
+          Manage subscriptions and revenue analytics
+        </p>
       </div>
 
-      {/* Revenue Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Monthly Recurring Revenue
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(data?.stats.totalMRR || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {formatCurrency(data?.stats.totalARR || 0)} ARR
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Active Subscriptions
-            </CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.activeSubscriptions || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {formatNumber(data?.stats.trialSubscriptions || 0)} on trial
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Average Revenue Per User
-            </CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(data?.stats.averageRevenuePerUser || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {data?.stats.churnRate
-                ? `${data.stats.churnRate.toFixed(1)}% churn`
-                : "N/A churn"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <Calendar className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatCurrency(data?.stats.totalRevenue || 0)}
-            </div>
-            <p className="text-xs text-muted-foreground">All time revenue</p>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Stats Cards */}
+      {data?.stats && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Monthly Recurring Revenue
+              </CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatCurrency(data.stats.totalMRR)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Active Subscriptions
+              </CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.activeSubscriptions)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Trial Users</CardTitle>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.trialSubscriptions)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Churn Rate</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {data.stats.churnRate.toFixed(1)}%
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filters */}
-      <Card className="mb-6">
-        <CardContent className="p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Search & Filter</CardTitle>
+        </CardHeader>
+        <CardContent>
           <form onSubmit={handleSearch} className="flex gap-4">
             <div className="flex-1">
               <Input
-                placeholder="Search by customer name or email..."
+                placeholder="Search subscriptions..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full"
               />
             </div>
             <Select
@@ -315,11 +306,12 @@ export default function AdminBillingPage() {
                 setFilters((prev) => ({ ...prev, plan: value }))
               }
             >
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="Plan" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Plans</SelectItem>
+                <SelectItem value={ALL_BILLING_PLANS}>All Plans</SelectItem>
+                <SelectItem value="free">Free</SelectItem>
                 <SelectItem value="premium">Premium</SelectItem>
                 <SelectItem value="enterprise">Enterprise</SelectItem>
                 <SelectItem value="team">Team</SelectItem>
@@ -331,15 +323,31 @@ export default function AdminBillingPage() {
                 setFilters((prev) => ({ ...prev, status: value }))
               }
             >
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
+                <SelectItem value={ALL_BILLING_STATUSES}>All Status</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="trialing">Trialing</SelectItem>
-                <SelectItem value="past_due">Past Due</SelectItem>
+                <SelectItem value="trialing">Trial</SelectItem>
                 <SelectItem value="canceled">Canceled</SelectItem>
+                <SelectItem value="past_due">Past Due</SelectItem>
+                <SelectItem value="unpaid">Unpaid</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={filters.interval}
+              onValueChange={(value) =>
+                setFilters((prev) => ({ ...prev, interval: value }))
+              }
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Interval" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_INTERVALS}>All Intervals</SelectItem>
+                <SelectItem value="month">Monthly</SelectItem>
+                <SelectItem value="year">Yearly</SelectItem>
               </SelectContent>
             </Select>
             <Button type="submit">
@@ -370,9 +378,9 @@ export default function AdminBillingPage() {
                     <TableHead>Plan</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Amount</TableHead>
-                    <TableHead>Billing</TableHead>
-                    <TableHead>Period</TableHead>
-                    <TableHead className="w-12"></TableHead>
+                    <TableHead>Interval</TableHead>
+                    <TableHead>Next Payment</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -381,87 +389,56 @@ export default function AdminBillingPage() {
                       <TableCell>
                         {subscription.userId ? (
                           <div>
-                            <p className="font-medium">
+                            <div className="font-medium">
                               {subscription.userId.name}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
+                            </div>
+                            <div className="text-sm text-muted-foreground">
                               {subscription.userId.email}
-                            </p>
+                            </div>
                           </div>
                         ) : subscription.teamId ? (
                           <div>
-                            <p className="font-medium">
+                            <div className="font-medium">
                               {subscription.teamId.name}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              Team Account
-                            </p>
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              Team: {subscription.teamId.slug}
+                            </div>
                           </div>
                         ) : (
                           <span className="text-muted-foreground">Unknown</span>
                         )}
                       </TableCell>
+                      <TableCell>{getPlanBadge(subscription.plan)}</TableCell>
                       <TableCell>
-                        <Badge
-                          variant={getPlanBadgeVariant(subscription.plan)}
-                          className="capitalize"
-                        >
-                          {subscription.plan}
-                        </Badge>
+                        {getStatusBadge(subscription.status)}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={getStatusBadgeVariant(subscription.status)}
-                          className="capitalize"
-                        >
-                          {subscription.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">
-                            {formatCurrency(subscription.amount / 100)}{" "}
-                            {subscription.currency.toUpperCase()}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            per {subscription.interval}
-                          </p>
+                        <div className="font-medium">
+                          {formatCurrency(
+                            subscription.amount,
+                            subscription.currency
+                          )}
                         </div>
+                      </TableCell>
+                      <TableCell className="capitalize">
+                        {subscription.interval}ly
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">
-                          <p>
-                            Next:{" "}
-                            {new Date(
-                              subscription.currentPeriodEnd
-                            ).toLocaleDateString()}
-                          </p>
-                          <p className="text-muted-foreground">
-                            Stripe ID:{" "}
-                            {subscription.stripeSubscriptionId.slice(-8)}
-                          </p>
+                          {formatRelativeTime(subscription.currentPeriodEnd)}
                         </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatRelativeTime(subscription.createdAt)}
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" className="h-8 w-8 p-0">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                window.open(
-                                  `https://dashboard.stripe.com/subscriptions/${subscription.stripeSubscriptionId}`,
-                                  "_blank"
-                                )
-                              }
-                            >
+                            <DropdownMenuItem>
                               <ExternalLink className="mr-2 h-4 w-4" />
                               View in Stripe
                             </DropdownMenuItem>
@@ -470,24 +447,10 @@ export default function AdminBillingPage() {
                               Download Invoice
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            {subscription.status === "active" ? (
-                              <DropdownMenuItem
-                                className="text-red-600"
-                                onClick={() =>
-                                  handleCancelSubscription(
-                                    subscription.stripeSubscriptionId
-                                  )
-                                }
-                              >
-                                <Ban className="mr-2 h-4 w-4" />
-                                Cancel Subscription
-                              </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem>
-                                <CheckCircle className="mr-2 h-4 w-4" />
-                                Reactivate
-                              </DropdownMenuItem>
-                            )}
+                            <DropdownMenuItem className="text-red-600">
+                              <Ban className="mr-2 h-4 w-4" />
+                              Cancel Subscription
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -497,31 +460,30 @@ export default function AdminBillingPage() {
               </Table>
 
               {/* Pagination */}
-              {data && data.pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between mt-6">
-                  <p className="text-sm text-muted-foreground">
-                    Showing{" "}
-                    {(data.pagination.page - 1) * data.pagination.limit + 1} to{" "}
-                    {Math.min(
-                      data.pagination.page * data.pagination.limit,
-                      data.pagination.total
-                    )}{" "}
-                    of {data.pagination.total} subscriptions
-                  </p>
-                  <div className="flex gap-2">
+              {data?.pagination && data.pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between space-x-2 py-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * 20 + 1} to{" "}
+                    {Math.min(currentPage * 20, data.pagination.total)} of{" "}
+                    {data.pagination.total} subscriptions
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchBilling(currentPage - 1)}
-                      disabled={!data.pagination.hasPrevPage || loading}
+                      disabled={!data.pagination.hasPrevPage}
                     >
                       Previous
                     </Button>
+                    <div className="text-sm">
+                      Page {currentPage} of {data.pagination.totalPages}
+                    </div>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchBilling(currentPage + 1)}
-                      disabled={!data.pagination.hasNextPage || loading}
+                      disabled={!data.pagination.hasNextPage}
                     >
                       Next
                     </Button>

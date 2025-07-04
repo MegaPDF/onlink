@@ -1,12 +1,10 @@
-// ============= app/api/admin/reports/route.ts =============
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
+import { URL as URLModel } from '@/models/URL';
 import { User } from '@/models/User';
-import { URL } from '@/models/URL';
 import { Analytics } from '@/models/Analytics';
-import { Subscription } from '@/models/Subscription';
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,135 +20,74 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const reportType = searchParams.get('type') || 'overview';
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
+    // Use Next.js 15 pattern for searchParams
+    const reportType = req.nextUrl.searchParams.get('type') || 'overview';
+    const startDate = req.nextUrl.searchParams.get('startDate');
+    const endDate = req.nextUrl.searchParams.get('endDate');
 
-    const dateFilter = startDate && endDate ? {
-      $gte: new Date(startDate),
-      $lte: new Date(endDate)
-    } : {
-      $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
-    };
+    // Date filter
+    const dateFilter: any = {};
+    if (startDate && endDate) {
+      dateFilter.$gte = new Date(startDate);
+      dateFilter.$lte = new Date(endDate);
+    } else {
+      // Default to last 30 days
+      dateFilter.$gte = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    }
 
     switch (reportType) {
       case 'overview':
-        // System overview report
-        const [userStats, urlStats, clickStats, revenueStats] = await Promise.all([
-          // User statistics
+        // Comprehensive overview report
+        const [urlReport, userReport, clickReport] = await Promise.all([
+          URLModel.aggregate([
+            { $match: { createdAt: dateFilter, isDeleted: false } },
+            {
+              $group: {
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                count: { $sum: 1 },
+                clicks: { $sum: '$clicks.total' }
+              }
+            },
+            { $sort: { _id: 1 } }
+          ]),
+
           User.aggregate([
+            { $match: { createdAt: dateFilter, isDeleted: false } },
             {
               $group: {
-                _id: null,
-                totalUsers: { $sum: 1 },
-                activeUsers: { $sum: { $cond: ['$isActive', 1, 0] } },
-                newUsers: {
-                  $sum: {
-                    $cond: [
-                      { $gte: ['$createdAt', dateFilter.$gte] },
-                      1,
-                      0
-                    ]
-                  }
-                },
-                usersByPlan: {
-                  $push: {
-                    plan: '$plan',
-                    count: 1
-                  }
-                }
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                count: { $sum: 1 }
               }
-            }
+            },
+            { $sort: { _id: 1 } }
           ]),
-          
-          // URL statistics
-          URL.aggregate([
-            {
-              $group: {
-                _id: null,
-                totalUrls: { $sum: 1 },
-                activeUrls: { $sum: { $cond: ['$isActive', 1, 0] } },
-                newUrls: {
-                  $sum: {
-                    $cond: [
-                      { $gte: ['$createdAt', dateFilter.$gte] },
-                      1,
-                      0
-                    ]
-                  }
-                }
-              }
-            }
-          ]),
-          
-          // Click statistics
+
           Analytics.aggregate([
+            { $match: { timestamp: dateFilter } },
             {
-              $match: {
-                timestamp: dateFilter,
-                'bot.isBot': false
+              $group: {
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
+                clicks: { $sum: 1 },
+                uniqueVisitors: { $addToSet: '$ip' }
               }
             },
             {
-              $group: {
-                _id: null,
-                totalClicks: { $sum: 1 },
-                uniqueClicks: { $addToSet: '$hashedIp' },
-                clicksByDay: {
-                  $push: {
-                    date: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } },
-                    count: 1
-                  }
-                }
+              $project: {
+                _id: 1,
+                clicks: 1,
+                uniqueVisitors: { $size: '$uniqueVisitors' }
               }
-            }
-          ]),
-          
-          // Revenue statistics
-          Subscription.aggregate([
-            {
-              $match: { status: 'active' }
             },
-            {
-              $group: {
-                _id: null,
-                totalMRR: {
-                  $sum: {
-                    $cond: [
-                      { $eq: ['$interval', 'month'] },
-                      '$amount',
-                      { $divide: ['$amount', 12] }
-                    ]
-                  }
-                },
-                totalARR: {
-                  $sum: {
-                    $cond: [
-                      { $eq: ['$interval', 'year'] },
-                      '$amount',
-                      { $multiply: ['$amount', 12] }
-                    ]
-                  }
-                },
-                subscriptionsByPlan: {
-                  $push: {
-                    plan: '$plan',
-                    amount: '$amount'
-                  }
-                }
-              }
-            }
+            { $sort: { _id: 1 } }
           ])
         ]);
 
         return NextResponse.json({
           success: true,
           data: {
-            users: userStats[0] || {},
-            urls: urlStats[0] || {},
-            clicks: clickStats[0] || {},
-            revenue: revenueStats[0] || {},
+            urlCreation: urlReport,
+            userRegistration: userReport,
+            clickActivity: clickReport,
             reportPeriod: {
               startDate: dateFilter.$gte,
               endDate: dateFilter.$lte || new Date()
@@ -160,7 +97,7 @@ export async function GET(req: NextRequest) {
 
       case 'users':
         // Detailed user report
-        const userReport = await User.aggregate([
+        const userDetailReport = await User.aggregate([
           {
             $match: {
               createdAt: dateFilter,
@@ -182,7 +119,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
           success: true,
           data: {
-            userRegistrations: userReport,
+            userRegistrations: userDetailReport,
             reportPeriod: {
               startDate: dateFilter.$gte,
               endDate: dateFilter.$lte || new Date()
@@ -192,7 +129,7 @@ export async function GET(req: NextRequest) {
 
       case 'clicks':
         // Detailed click report
-        const clickReport = await Analytics.aggregate([
+        const clickDetailReport = await Analytics.aggregate([
           {
             $match: {
               timestamp: dateFilter,
@@ -215,7 +152,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
           success: true,
           data: {
-            clickAnalytics: clickReport,
+            clickAnalytics: clickDetailReport,
             reportPeriod: {
               startDate: dateFilter.$gte,
               endDate: dateFilter.$lte || new Date()

@@ -1,4 +1,3 @@
-// ============= lib/utils.ts =============
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { nanoid } from 'nanoid';
@@ -47,17 +46,37 @@ export function formatCurrency(amount: number, currency: string = 'USD'): string
   }).format(amount / 100); // Stripe amounts are in cents
 }
 
-// Format relative time
-export function formatRelativeTime(date: Date): string {
+// Format relative time - FIXED
+export function formatRelativeTime(date: Date | string | number): string {
+  // Ensure we have a proper Date object
+  const dateObj = new Date(date);
+  
+  // Check if the date is valid
+  if (isNaN(dateObj.getTime())) {
+    return 'Invalid date';
+  }
+  
   const now = new Date();
-  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+  const diffInSeconds = Math.floor((now.getTime() - dateObj.getTime()) / 1000);
   
   if (diffInSeconds < 60) return 'just now';
   if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
   if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
   if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)}d ago`;
   
-  return date.toLocaleDateString();
+  return dateObj.toLocaleDateString();
+}
+
+// Safe date conversion utility
+export function ensureDate(value: Date | string | number): Date {
+  if (value instanceof Date) {
+    return value;
+  }
+  const date = new Date(value);
+  if (isNaN(date.getTime())) {
+    throw new Error(`Invalid date value: ${value}`);
+  }
+  return date;
 }
 
 // Validate URL
@@ -90,45 +109,15 @@ export function getFaviconUrl(url: string): string {
   }
 }
 
-// Sanitize filename
-export function sanitizeFilename(filename: string): string {
-  return filename.replace(/[^a-z0-9.-]/gi, '_').toLowerCase();
-}
-
-// Generate slug from text
-export function generateSlug(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/[\s_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-// Check if string is valid JSON
-export function isValidJson(str: string): boolean {
-  try {
-    JSON.parse(str);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // Truncate text
 export function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength - 3) + '...';
+  return text.substring(0, maxLength) + '...';
 }
 
-// Get initials from name
-export function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(word => word.charAt(0))
-    .join('')
-    .toUpperCase()
-    .substring(0, 2);
+// Sleep utility
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // Debounce function
@@ -140,84 +129,5 @@ export function debounce<T extends (...args: any[]) => any>(
   return (...args: Parameters<T>) => {
     clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
-  };
-}
-
-// Sleep utility
-export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Generate color from string
-export function stringToColor(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  
-  const hue = hash % 360;
-  return `hsl(${hue}, 70%, 50%)`;
-}
-
-// Check if user agent is mobile
-export function isMobile(userAgent: string): boolean {
-  return /Mobile|Android|iPhone|iPad|iPod|BlackBerry|Windows Phone/i.test(userAgent);
-}
-
-// Parse user agent
-export function parseUserAgent(userAgent: string) {
-  const isBot = /bot|crawler|spider|crawling/i.test(userAgent);
-  const isMobileDevice = isMobile(userAgent);
-  
-  let browser = 'Unknown';
-  let os = 'Unknown';
-  
-  // Browser detection
-  if (userAgent.includes('Chrome')) browser = 'Chrome';
-  else if (userAgent.includes('Firefox')) browser = 'Firefox';
-  else if (userAgent.includes('Safari')) browser = 'Safari';
-  else if (userAgent.includes('Edge')) browser = 'Edge';
-  
-  // OS detection
-  if (userAgent.includes('Windows')) os = 'Windows';
-  else if (userAgent.includes('Mac')) os = 'macOS';
-  else if (userAgent.includes('Linux')) os = 'Linux';
-  else if (userAgent.includes('Android')) os = 'Android';
-  else if (userAgent.includes('iOS')) os = 'iOS';
-  
-  return {
-    browser,
-    os,
-    isMobile: isMobileDevice,
-    isBot,
-    deviceType: isBot ? 'bot' : isMobileDevice ? 'mobile' : 'desktop'
-  };
-}
-
-// Rate limiting helper
-export function createRateLimiter(windowMs: number, maxRequests: number) {
-  const requests = new Map<string, number[]>();
-  
-  return (identifier: string): boolean => {
-    const now = Date.now();
-    const windowStart = now - windowMs;
-    
-    if (!requests.has(identifier)) {
-      requests.set(identifier, []);
-    }
-    
-    const userRequests = requests.get(identifier)!;
-    
-    // Remove old requests
-    const validRequests = userRequests.filter(time => time > windowStart);
-    
-    if (validRequests.length >= maxRequests) {
-      return false; // Rate limit exceeded
-    }
-    
-    validRequests.push(now);
-    requests.set(identifier, validRequests);
-    
-    return true; // Request allowed
   };
 }

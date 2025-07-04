@@ -30,7 +30,6 @@ import {
   Crown,
   Shield,
 } from "lucide-react";
-import { getInitials } from "@/lib/utils";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -88,6 +87,17 @@ export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
   // Force re-render when authentication status changes
   const authKey = `${isAuthenticated}-${status}-${user?.id || "guest"}`;
 
+    function getInitials(name: string): React.ReactNode {
+        if (!name) return "";
+        const words = name.trim().split(" ");
+        if (words.length === 1) {
+            return words[0].charAt(0).toUpperCase();
+        }
+        return (
+            words[0].charAt(0).toUpperCase() +
+            words[words.length - 1].charAt(0).toUpperCase()
+        );
+    }
   return (
     <header
       key={authKey}

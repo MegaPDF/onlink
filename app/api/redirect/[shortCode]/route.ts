@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import { URL } from '@/models/URL';
 import { AnalyticsTracker } from '@/lib/analytics';
-import { parseUserAgent } from '@/lib/utils';
 
 export async function GET(
   req: NextRequest,
@@ -104,9 +103,14 @@ export async function GET(
     // Track analytics in background (non-blocking)
     setImmediate(async () => {
       try {
-        await AnalyticsTracker.trackClick(shortCode, req, {
-          isQRClick,
-          qrSource
+        await AnalyticsTracker.recordClick({
+          shortCode,
+          ip: req.headers.get('x-forwarded-for') || '',
+          userAgent: req.headers.get('user-agent') || '',
+          referrer: req.headers.get('referer') || '',
+          device: deviceInfo,
+          // Optionally add country, city if available
+          // Optionally add isQRClick, qrSource as custom fields if your analytics model supports them
         });
       } catch (analyticsError) {
         console.error('Analytics tracking error:', analyticsError);
@@ -197,4 +201,21 @@ export async function POST(
     console.error('Password verification error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
+}
+function parseUserAgent(userAgent: string) {
+    // Basic user agent parsing for device type
+    const ua = userAgent.toLowerCase();
+
+    let deviceType: 'mobile' | 'tablet' | 'desktop' = 'desktop';
+
+    if (/mobile|iphone|ipod|android.*mobile|windows phone|blackberry|opera mini|opera mobi/.test(ua)) {
+        deviceType = 'mobile';
+    } else if (/ipad|android(?!.*mobile)|tablet|kindle|silk/.test(ua)) {
+        deviceType = 'tablet';
+    }
+
+    return {
+        deviceType,
+        raw: userAgent
+    };
 }

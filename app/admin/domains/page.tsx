@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
-import { useToast } from "@/hooks/use-toast";
 import {
   Table,
   TableBody,
@@ -59,6 +58,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { formatRelativeTime, formatNumber } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface DomainData {
   _id: string;
@@ -104,27 +104,29 @@ interface DomainsPageData {
   };
   stats: {
     totalDomains: number;
-    verifiedDomains: number;
     activeDomains: number;
+    verifiedDomains: number;
     customDomains: number;
-    systemDomains: number;
   };
 }
+
+// Define special "all" values to replace empty strings
+const ALL_TYPES = "all_types";
+const ALL_STATUSES = "all_statuses";
+const ALL_VERIFICATION = "all_verification";
 
 export default function AdminDomainsPage() {
   const [data, setData] = useState<DomainsPageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
-    type: "",
-    status: "",
+    type: ALL_TYPES,
+    status: ALL_STATUSES,
+    verification: ALL_VERIFICATION,
     sortBy: "createdAt",
     sortOrder: "desc",
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [newDomain, setNewDomain] = useState({ domain: "", type: "custom" });
-  const toast = useToast();
 
   const fetchDomains = useCallback(
     async (page = 1) => {
@@ -134,257 +136,170 @@ export default function AdminDomainsPage() {
           page: page.toString(),
           limit: "20",
           search: searchTerm,
-          ...filters,
+          // Convert special "all" values back to empty strings for API
+          type: filters.type === ALL_TYPES ? "" : filters.type,
+          status: filters.status === ALL_STATUSES ? "" : filters.status,
+          verification:
+            filters.verification === ALL_VERIFICATION
+              ? ""
+              : filters.verification,
+          sortBy: filters.sortBy,
+          sortOrder: filters.sortOrder,
         });
 
-        const response = await fetch(`/api/admin/domains?${params}`);
-        const result = await response.json();
-
+        const response = await fetch(`/api/admin/domains?${params.toString()}`);
         if (!response.ok) {
-          throw new Error(result.error || "Failed to fetch domains");
+          throw new Error("Failed to fetch domains");
         }
 
+        const result = await response.json();
         setData(result.data);
         setCurrentPage(page);
       } catch (error) {
         console.error("Error fetching domains:", error);
-        toast.error("Failed to load domains");
+        toast("Failed to fetch domains. Please try again.");
       } finally {
         setLoading(false);
       }
     },
-    [searchTerm, filters, toast]
+    [searchTerm, filters]
   );
-
-  useEffect(() => {
-    fetchDomains(1);
-  }, [fetchDomains]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchDomains(1);
   };
 
-  const handleCreateDomain = async () => {
-    try {
-      const response = await fetch("/api/admin/domains", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newDomain),
-      });
+  useEffect(() => {
+    fetchDomains();
+  }, []);
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to create domain");
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (searchTerm !== undefined) {
+        fetchDomains(1);
       }
+    }, 500);
 
-      toast.success("Domain created successfully");
-      setCreateDialogOpen(false);
-      setNewDomain({ domain: "", type: "custom" });
-      fetchDomains(currentPage);
-    } catch (error) {
-      console.error("Error creating domain:", error);
-      toast.error("Failed to create domain");
-    }
-  };
+    return () => clearTimeout(delayedSearch);
+  }, [searchTerm, filters]);
 
-  const handleDeleteDomain = async (domainId: string) => {
-    try {
-      const response = await fetch(`/api/admin/domains?domainId=${domainId}`, {
-        method: "DELETE",
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to delete domain");
-      }
-
-      toast.success("Domain deleted successfully");
-      fetchDomains(currentPage);
-    } catch (error) {
-      console.error("Error deleting domain:", error);
-      toast.error("Failed to delete domain");
-    }
-  };
-
-  const getStatusIcon = (domain: DomainData) => {
-    if (domain.isVerified && domain.isActive) {
-      return <CheckCircle className="h-4 w-4 text-green-500" />;
-    } else if (domain.isVerified && !domain.isActive) {
-      return <AlertCircle className="h-4 w-4 text-yellow-500" />;
-    } else {
-      return <XCircle className="h-4 w-4 text-red-500" />;
-    }
-  };
-
-  const getStatusText = (domain: DomainData) => {
-    if (domain.isVerified && domain.isActive) return "Active";
-    if (domain.isVerified && !domain.isActive) return "Inactive";
-    return "Unverified";
-  };
-
-  const getTypeBadgeVariant = (type: string) => {
+  const getTypeBadge = (type: string) => {
     switch (type) {
       case "system":
-        return "default";
+        return <Badge variant="default">System</Badge>;
       case "custom":
-        return "secondary";
+        return <Badge variant="secondary">Custom</Badge>;
       case "subdomain":
-        return "outline";
+        return <Badge variant="outline">Subdomain</Badge>;
       default:
-        return "outline";
+        return <Badge variant="outline">{type}</Badge>;
     }
+  };
+
+  const getStatusBadge = (isActive: boolean, isVerified: boolean) => {
+    if (!isVerified) {
+      return <Badge variant="destructive">Unverified</Badge>;
+    }
+    return isActive ? (
+      <Badge variant="default" className="bg-green-100 text-green-800">
+        Active
+      </Badge>
+    ) : (
+      <Badge variant="secondary">Inactive</Badge>
+    );
   };
 
   if (loading && !data) {
     return (
-      <div className="container mx-auto py-6 px-4">
-        <div className="flex items-center justify-center min-h-96">
-          <LoadingSpinner size="lg" />
-        </div>
+      <div className="flex items-center justify-center h-96">
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="flex items-center justify-between mb-8">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Domain Management</h1>
-          <p className="text-muted-foreground">Manage all platform domains</p>
+          <h1 className="text-3xl font-bold">Domains</h1>
+          <p className="text-muted-foreground">
+            Manage domains and SSL certificates
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => fetchDomains(currentPage)} variant="outline">
-            <Globe className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Domain
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add New Domain</DialogTitle>
-                <DialogDescription>
-                  Add a new domain to the platform
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium">Domain</label>
-                  <Input
-                    placeholder="example.com"
-                    value={newDomain.domain}
-                    onChange={(e) =>
-                      setNewDomain((prev) => ({
-                        ...prev,
-                        domain: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Type</label>
-                  <Select
-                    value={newDomain.type}
-                    onValueChange={(value) =>
-                      setNewDomain((prev) => ({ ...prev, type: value }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="system">System</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
-                      <SelectItem value="subdomain">Subdomain</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setCreateDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button onClick={handleCreateDomain}>Create Domain</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
+        <Button>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Domain
+        </Button>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.totalDomains || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Verified</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.verifiedDomains || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.activeDomains || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Custom</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.customDomains || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">System</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.systemDomains || 0)}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {data?.stats && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total Domains
+              </CardTitle>
+              <Globe className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.totalDomains)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Active Domains
+              </CardTitle>
+              <CheckCircle className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.activeDomains)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Verified</CardTitle>
+              <Shield className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.verifiedDomains)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Custom</CardTitle>
+              <Settings className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.customDomains)}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filters */}
-      <Card className="mb-6">
-        <CardContent className="p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Search & Filter</CardTitle>
+        </CardHeader>
+        <CardContent>
           <form onSubmit={handleSearch} className="flex gap-4">
             <div className="flex-1">
               <Input
                 placeholder="Search domains..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full"
               />
             </div>
             <Select
@@ -393,11 +308,11 @@ export default function AdminDomainsPage() {
                 setFilters((prev) => ({ ...prev, type: value }))
               }
             >
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Types</SelectItem>
+                <SelectItem value={ALL_TYPES}>All Types</SelectItem>
                 <SelectItem value="system">System</SelectItem>
                 <SelectItem value="custom">Custom</SelectItem>
                 <SelectItem value="subdomain">Subdomain</SelectItem>
@@ -409,15 +324,28 @@ export default function AdminDomainsPage() {
                 setFilters((prev) => ({ ...prev, status: value }))
               }
             >
-              <SelectTrigger className="w-32">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
-                <SelectItem value="verified">Verified</SelectItem>
-                <SelectItem value="unverified">Unverified</SelectItem>
+                <SelectItem value={ALL_STATUSES}>All Status</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={filters.verification}
+              onValueChange={(value) =>
+                setFilters((prev) => ({ ...prev, verification: value }))
+              }
+            >
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Verification" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_VERIFICATION}>All</SelectItem>
+                <SelectItem value="verified">Verified</SelectItem>
+                <SelectItem value="unverified">Unverified</SelectItem>
               </SelectContent>
             </Select>
             <Button type="submit">
@@ -448,9 +376,9 @@ export default function AdminDomainsPage() {
                     <TableHead>Type</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Owner</TableHead>
-                    <TableHead>Usage</TableHead>
+                    <TableHead>Links</TableHead>
                     <TableHead>Created</TableHead>
-                    <TableHead className="w-12"></TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -458,68 +386,50 @@ export default function AdminDomainsPage() {
                     <TableRow key={domain._id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          {getStatusIcon(domain)}
+                          <Globe className="h-4 w-4 text-muted-foreground" />
                           <div>
-                            <p className="font-medium">{domain.domain}</p>
-                            <p className="text-sm text-muted-foreground">
-                              SSL: {domain.ssl.provider}
-                            </p>
+                            <div className="font-medium">{domain.domain}</div>
+                            {domain.ssl.validTo && (
+                              <div className="text-xs text-muted-foreground">
+                                SSL expires{" "}
+                                {formatRelativeTime(domain.ssl.validTo)}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </TableCell>
+                      <TableCell>{getTypeBadge(domain.type)}</TableCell>
                       <TableCell>
-                        <Badge
-                          variant={getTypeBadgeVariant(domain.type)}
-                          className="capitalize"
-                        >
-                          {domain.type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            domain.isVerified && domain.isActive
-                              ? "default"
-                              : "secondary"
-                          }
-                        >
-                          {getStatusText(domain)}
-                        </Badge>
+                        {getStatusBadge(domain.isActive, domain.isVerified)}
                       </TableCell>
                       <TableCell>
                         {domain.userId ? (
                           <div>
-                            <p className="font-medium">{domain.userId.name}</p>
-                            <p className="text-sm text-muted-foreground">
+                            <div className="font-medium">
+                              {domain.userId.name}
+                            </div>
+                            <div className="text-sm text-muted-foreground">
                               {domain.userId.email}
-                            </p>
-                          </div>
-                        ) : domain.teamId ? (
-                          <div>
-                            <p className="font-medium">{domain.teamId.name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              Team
-                            </p>
+                            </div>
                           </div>
                         ) : (
-                          <span className="text-muted-foreground">System</span>
+                          <Badge variant="outline">System</Badge>
                         )}
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">
-                          <p>{formatNumber(domain.usage.linksCount)} links</p>
-                          <p className="text-muted-foreground">
-                            {formatNumber(domain.usage.clicksCount)} clicks
-                          </p>
+                          {formatNumber(domain.usage.linksCount)}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatRelativeTime(domain.createdAt)}
+                      <TableCell>
+                        <div className="text-sm">
+                          {formatRelativeTime(domain.createdAt)}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" className="h-8 w-8 p-0">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -534,10 +444,7 @@ export default function AdminDomainsPage() {
                               SSL Settings
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-red-600"
-                              onClick={() => handleDeleteDomain(domain._id)}
-                            >
+                            <DropdownMenuItem className="text-red-600">
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </DropdownMenuItem>
@@ -550,31 +457,30 @@ export default function AdminDomainsPage() {
               </Table>
 
               {/* Pagination */}
-              {data && data.pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between mt-6">
-                  <p className="text-sm text-muted-foreground">
-                    Showing{" "}
-                    {(data.pagination.page - 1) * data.pagination.limit + 1} to{" "}
-                    {Math.min(
-                      data.pagination.page * data.pagination.limit,
-                      data.pagination.total
-                    )}{" "}
-                    of {data.pagination.total} domains
-                  </p>
-                  <div className="flex gap-2">
+              {data?.pagination && data.pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between space-x-2 py-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * 20 + 1} to{" "}
+                    {Math.min(currentPage * 20, data.pagination.total)} of{" "}
+                    {data.pagination.total} domains
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchDomains(currentPage - 1)}
-                      disabled={!data.pagination.hasPrevPage || loading}
+                      disabled={!data.pagination.hasPrevPage}
                     >
                       Previous
                     </Button>
+                    <div className="text-sm">
+                      Page {currentPage} of {data.pagination.totalPages}
+                    </div>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchDomains(currentPage + 1)}
-                      disabled={!data.pagination.hasNextPage || loading}
+                      disabled={!data.pagination.hasNextPage}
                     >
                       Next
                     </Button>

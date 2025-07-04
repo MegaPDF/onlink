@@ -1,90 +1,95 @@
-// ============= hooks/use-analytics.ts =============
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useToast } from './use-toast';
-import type { URLAnalytics } from '@/types/url';
+import { ensureDate } from '@/lib/utils';
+
+interface AnalyticsData {
+  totalClicks: number;
+  uniqueClicks: number;
+  dailyStats: Array<{ date: string; clicks: number }>;
+  geography: Array<{ country: string; count: number }>;
+  devices: Array<{ type: string; count: number }>;
+  referrers: Array<{ domain: string; count: number }>;
+}
 
 interface AnalyticsFilters {
   dateRange: {
     start: Date;
     end: Date;
   };
+}
+
+interface UseAnalyticsOptions {
   shortCode?: string;
-  country?: string;
-  device?: string;
-  referrer?: string;
+  autoRefresh?: boolean;
+  refreshInterval?: number;
 }
 
-interface AnalyticsData {
-  totalClicks: number;
-  uniqueClicks: number;
-  clickRate: number;
-  geography: { country: string; count: number }[];
-  devices: { type: string; count: number }[];
-  browsers: { browser: string; count: number }[];
-  referrers: { domain: string; count: number }[];
-  dailyStats: { date: string; clicks: number }[];
-}
-
-export function useAnalytics(initialShortCode?: string) {
+export function useAnalytics({ 
+  shortCode, 
+  autoRefresh = false, 
+  refreshInterval = 30000 
+}: UseAnalyticsOptions = {}) {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<AnalyticsFilters>({
     dateRange: {
-      start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
+      start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
       end: new Date()
-    },
-    shortCode: initialShortCode
+    }
   });
-  
-  const toast = useToast();
 
-  // Fetch analytics data
-  const fetchAnalytics = useCallback(async (customFilters?: Partial<AnalyticsFilters>) => {
-    const queryFilters = { ...filters, ...customFilters };
+  const fetchAnalytics = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const params = new URLSearchParams({
-        startDate: queryFilters.dateRange.start.toISOString(),
-        endDate: queryFilters.dateRange.end.toISOString(),
-        ...(queryFilters.shortCode && { shortCode: queryFilters.shortCode }),
-        ...(queryFilters.country && { country: queryFilters.country }),
-        ...(queryFilters.device && { device: queryFilters.device }),
-        ...(queryFilters.referrer && { referrer: queryFilters.referrer })
-      });
+      const params = new URLSearchParams();
+      
+      if (shortCode) {
+        params.append('shortCode', shortCode);
+      }
+      
+      // Ensure dates are properly formatted
+      const startDate = ensureDate(filters.dateRange.start);
+      const endDate = ensureDate(filters.dateRange.end);
+      
+      params.append('startDate', startDate.toISOString());
+      params.append('endDate', endDate.toISOString());
 
-      const response = await fetch(`/api/client/analytics?${params}`);
-      const result = await response.json();
-
+      const response = await fetch(`/api/client/analytics?${params.toString()}`);
+      
       if (!response.ok) {
-        throw new Error(result.message || 'Failed to fetch analytics');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch analytics');
       }
 
-      setData(result.data);
+      const result = await response.json();
+      setData(result.data.analytics || result.data);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch analytics';
-      setError(message);
-      toast.error(message);
+      setError(err instanceof Error ? err.message : 'Unknown error occurred');
+      console.error('Analytics fetch error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [filters, toast]);
+  }, [shortCode, filters]);
 
-  // Export analytics data
-  const exportAnalytics = useCallback(async (format: 'csv' | 'pdf' = 'csv') => {
-    const loadingToast = toast.loading('Exporting analytics...');
-
+  const exportAnalytics = useCallback(async (format: 'csv' | 'json' = 'csv') => {
     try {
+      const startDate = ensureDate(filters.dateRange.start);
+      const endDate = ensureDate(filters.dateRange.end);
+      
       const params = new URLSearchParams({
-        startDate: filters.dateRange.start.toISOString(),
-        endDate: filters.dateRange.end.toISOString(),
+        type: 'analytics',
         format,
-        ...(filters.shortCode && { shortCode: filters.shortCode })
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString()
       });
 
-      const response = await fetch(`/api/client/analytics/export?${params}`);
+      if (shortCode) {
+        params.append('shortCode', shortCode);
+      }
+
+      const response = await fetch(`/api/client/export?${params.toString()}`);
       
       if (!response.ok) {
         throw new Error('Export failed');
@@ -95,31 +100,28 @@ export function useAnalytics(initialShortCode?: string) {
       const a = document.createElement('a');
       a.href = url;
       a.download = `analytics-${Date.now()}.${format}`;
+      document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
-
-      toast.dismiss(loadingToast);
-      toast.success('Analytics exported successfully');
+      document.body.removeChild(a);
     } catch (error) {
-      toast.dismiss(loadingToast);
-      toast.error('Export failed');
+      console.error('Export error:', error);
+      throw error;
     }
-  }, [filters, toast]);
+  }, [filters, shortCode]);
 
-  // Real-time analytics (for dashboard)
-  const startRealTimeUpdates = useCallback((intervalMs: number = 30000) => {
-    return setInterval(() => {
-      fetchAnalytics();
-    }, intervalMs);
-  }, [fetchAnalytics]);
-
-  // Update filters
   const updateFilters = useCallback((newFilters: Partial<AnalyticsFilters>) => {
-    setFilters(prev => ({ ...prev, ...newFilters }));
+    setFilters(prev => ({
+      ...prev,
+      ...newFilters,
+      dateRange: {
+        ...prev.dateRange,
+        ...newFilters.dateRange
+      }
+    }));
   }, []);
 
-  // Set date range presets
-  const setDateRange = useCallback((preset: 'today' | 'yesterday' | '7days' | '30days' | '90days' | 'custom', customRange?: { start: Date; end: Date }) => {
+  const setDateRange = useCallback((preset: string, customRange?: { start: Date; end: Date }) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
@@ -148,8 +150,8 @@ export function useAnalytics(initialShortCode?: string) {
         break;
       case 'custom':
         if (!customRange) return;
-        start = customRange.start;
-        end = customRange.end;
+        start = ensureDate(customRange.start);
+        end = ensureDate(customRange.end);
         break;
       default:
         return;
@@ -160,17 +162,20 @@ export function useAnalytics(initialShortCode?: string) {
     });
   }, [updateFilters]);
 
-  // Calculated metrics
+  // Calculated metrics - FIXED date handling
   const metrics = useMemo(() => {
     if (!data) return null;
 
-    const totalDays = Math.max(1, Math.ceil((filters.dateRange.end.getTime() - filters.dateRange.start.getTime()) / (1000 * 60 * 60 * 24)));
+    const startTime = ensureDate(filters.dateRange.start).getTime();
+    const endTime = ensureDate(filters.dateRange.end).getTime();
+    const totalDays = Math.max(1, Math.ceil((endTime - startTime) / (1000 * 60 * 60 * 24)));
     const averageClicksPerDay = Math.round(data.totalClicks / totalDays);
     
     // Calculate growth (comparing to previous period)
-    const previousPeriodClicks = data.dailyStats.slice(0, Math.floor(data.dailyStats.length / 2))
+    const halfLength = Math.floor(data.dailyStats.length / 2);
+    const previousPeriodClicks = data.dailyStats.slice(0, halfLength)
       .reduce((sum, day) => sum + day.clicks, 0);
-    const currentPeriodClicks = data.dailyStats.slice(Math.floor(data.dailyStats.length / 2))
+    const currentPeriodClicks = data.dailyStats.slice(halfLength)
       .reduce((sum, day) => sum + day.clicks, 0);
     
     const growth = previousPeriodClicks > 0 
@@ -188,6 +193,21 @@ export function useAnalytics(initialShortCode?: string) {
       topReferrer: data.referrers[0]?.domain || 'Direct'
     };
   }, [data, filters]);
+
+  // Auto-refresh functionality
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (autoRefresh && refreshInterval > 0) {
+      interval = setInterval(fetchAnalytics, refreshInterval);
+    }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [autoRefresh, refreshInterval, fetchAnalytics]);
 
   // Initial load
   useEffect(() => {
@@ -212,7 +232,6 @@ export function useAnalytics(initialShortCode?: string) {
     // Actions
     fetchAnalytics,
     exportAnalytics,
-    startRealTimeUpdates,
     updateFilters,
     setDateRange,
     

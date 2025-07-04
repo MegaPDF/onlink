@@ -29,29 +29,6 @@ export function MainLayout({
       />
 
       <div className="flex">
-        {showSidebar && (
-          <>
-            {/* Desktop sidebar */}
-            <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 md:pt-16">
-              <Sidebar />
-            </aside>
-
-            {/* Mobile sidebar overlay */}
-            {sidebarOpen && (
-              <div className="fixed inset-0 z-50 md:hidden">
-                <div
-                  className="absolute inset-0 bg-background/80 backdrop-blur-sm"
-                  onClick={() => setSidebarOpen(false)}
-                />
-                <aside className="absolute left-0 top-0 h-full w-64 bg-background border-r pt-16">
-                  <Sidebar onNavigate={() => setSidebarOpen(false)} />
-                </aside>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Main content */}
         <main
           className={cn(
             "flex-1 min-h-screen",

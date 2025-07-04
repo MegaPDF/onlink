@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth';
 import { connectDB } from '@/lib/mongodb';
 import { User } from '@/models/User';
 import { Team } from '@/models/Team';
-import { URL } from '@/models/URL';
+import { URL as URLModel } from '@/models/URL';
 import { AuditLog } from '@/models/AuditLog';
 import { SecurityService } from '@/lib/security';
 import { EmailService } from '@/lib/email';
@@ -36,15 +36,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '10');
-    const search = searchParams.get('search') || '';
-    const role = searchParams.get('role') || '';
-    const plan = searchParams.get('plan') || '';
-    const status = searchParams.get('status') || '';
-    const sortBy = searchParams.get('sortBy') || 'createdAt';
-    const sortOrder = searchParams.get('sortOrder') || 'desc';
+    // Use Next.js 15 pattern for searchParams
+    const page = parseInt(req.nextUrl.searchParams.get('page') || '1');
+    const limit = parseInt(req.nextUrl.searchParams.get('limit') || '10');
+    const search = req.nextUrl.searchParams.get('search') || '';
+    const role = req.nextUrl.searchParams.get('role') || '';
+    const plan = req.nextUrl.searchParams.get('plan') || '';
+    const status = req.nextUrl.searchParams.get('status') || '';
+    const sortBy = req.nextUrl.searchParams.get('sortBy') || 'createdAt';
+    const sortOrder = req.nextUrl.searchParams.get('sortOrder') || 'desc';
 
     // Build filter query
     const filter: any = { isDeleted: false };
@@ -130,46 +130,49 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { userId, updates } = await req.json();
+    const userId = req.nextUrl.searchParams.get('userId');
 
-    // Validate updates
-    const UpdateUserSchema = z.object({
+    if (!userId) {
+      return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
+    }
+
+    const body = await req.json();
+
+    // Validation schema for user updates
+    const updateUserSchema = z.object({
       name: z.string().min(1).max(100).optional(),
       email: z.string().email().optional(),
-      role: z.enum(['user', 'admin', 'moderator']).optional(),
+      role: z.enum(['user', 'admin']).optional(),
       plan: z.enum(['free', 'premium', 'enterprise']).optional(),
       isActive: z.boolean().optional(),
-      preferences: z.object({
-        notifications: z.object({
-          email: z.boolean().optional(),
-          marketing: z.boolean().optional(),
-          security: z.boolean().optional(),
-          analytics: z.boolean().optional()
-        }).optional()
-      }).optional()
+      isEmailVerified: z.boolean().optional()
     });
 
-    const validatedUpdates = UpdateUserSchema.parse(updates);
+    const validatedUpdates = updateUserSchema.parse(body);
 
-    // Get original user for audit log
+    // Check if email is being changed and if it's already taken
+    if (validatedUpdates.email) {
+      const existingUser = await User.findOne({ 
+        email: validatedUpdates.email, 
+        _id: { $ne: userId } 
+      });
+      if (existingUser) {
+        return NextResponse.json({ error: 'Email already in use' }, { status: 400 });
+      }
+    }
+
     const originalUser = await User.findById(userId);
     if (!originalUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Prevent self-demotion
-    if (userId === session.user.id && validatedUpdates.role && validatedUpdates.role !== 'admin') {
-      return NextResponse.json({ error: 'Cannot change your own admin role' }, { status: 400 });
-    }
-
-    // Update user
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { $set: validatedUpdates },
+      validatedUpdates,
       { new: true, runValidators: true }
     ).select('-password -security.twoFactorSecret');
 
-    // Create audit log
+    // Track changes for audit log
     const changes = Object.keys(validatedUpdates).map(field => ({
       field,
       oldValue: (originalUser as any)[field],
@@ -241,8 +244,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = req.nextUrl.searchParams.get('userId');
 
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
@@ -265,8 +267,8 @@ export async function DELETE(req: NextRequest) {
       isActive: false
     });
 
-    // Soft delete user's URLs
-    await URL.updateMany(
+    // Soft delete user's URLs using the renamed model
+    await URLModel.updateMany(
       { userId, isDeleted: false },
       { isDeleted: true, deletedAt: new Date() }
     );
@@ -292,3 +294,4 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+

@@ -1,255 +1,19 @@
-
 import { Analytics } from '@/models/Analytics';
 import { URL as URLModel } from '@/models/URL';
-import { nanoid } from 'nanoid';
-import { hashData, parseUserAgent } from './utils';
-import geoip from 'geoip-lite';
+import { ensureDate } from './utils';
 
 export class AnalyticsTracker {
-  
-  static async trackClick(
-    shortCode: string,
-    request: Request,
-    additionalData: {
-      isQRClick?: boolean;
-      qrSource?: 'image' | 'pdf' | 'print';
-    } = {}
-  ) {
-    try {
-      // Extract request data
-      const ip = this.getClientIP(request);
-      const userAgent = request.headers.get('user-agent') || '';
-      const referrer = request.headers.get('referer') || '';
-      const doNotTrack = request.headers.get('dnt') === '1';
-      
-      // Get URL document
-      const urlDoc = await URLModel.findOne({ shortCode, isDeleted: false });
-      if (!urlDoc) {
-        throw new Error('URL not found');
-      }
-      
-      // Parse user agent
-      const deviceInfo = parseUserAgent(userAgent);
-      
-      // Get geographic data
-      const geoData = geoip.lookup(ip);
-      
-      // Parse referrer
-      const referrerData = this.parseReferrer(referrer);
-      
-      // Create analytics record
-      const analyticsData = new Analytics({
-        urlId: urlDoc._id,
-        shortCode,
-        clickId: nanoid(16),
-        timestamp: new Date(),
-        
-        ip,
-        hashedIp: hashData(ip),
-        userAgent,
-        fingerprint: hashData(ip + userAgent),
-        
-        country: geoData?.country || undefined,
-        countryCode: geoData?.country?.toLowerCase() || undefined,
-        region: geoData?.region || undefined,
-        city: geoData?.city || undefined,
-        latitude: geoData?.ll?.[0] || undefined,
-        longitude: geoData?.ll?.[1] || undefined,
-        timezone: geoData?.timezone || undefined,
-        
-        device: {
-          type: deviceInfo.deviceType as any,
-          os: deviceInfo.os,
-          browser: deviceInfo.browser
-        },
-        
-        referrer: referrerData,
-        
-        technical: {
-          protocol: 'https',
-          method: 'GET',
-          statusCode: 302,
-          responseTime: 0,
-          redirectCount: 1
-        },
-        
-        qrCode: {
-          isQRClick: additionalData.isQRClick || false,
-          qrSource: additionalData.qrSource
-        },
-        
-        bot: {
-          isBot: deviceInfo.isBot,
-          botName: deviceInfo.isBot ? this.detectBotName(userAgent) : undefined
-        },
-        
-        privacy: {
-          doNotTrack
-        },
-        
-        processed: {
-          isProcessed: false
-        }
-      });
-      
-      await analyticsData.save();
-      
-      // Update URL click statistics in background
-      setImmediate(() => {
-        this.updateURLClickStats(shortCode);
-      });
-      
-      return analyticsData;
-    } catch (error) {
-      console.error('Analytics tracking error:', error);
-      throw error;
-    }
-  }
-  
-  private static getClientIP(request: Request): string {
-    const forwardedFor = request.headers.get('x-forwarded-for');
-    const realIP = request.headers.get('x-real-ip');
-    const cfConnectingIP = request.headers.get('cf-connecting-ip');
-    
-    if (cfConnectingIP) return cfConnectingIP;
-    if (realIP) return realIP;
-    if (forwardedFor) {
-      return forwardedFor.split(',')[0].trim();
-    }
-    
-    return '127.0.0.1';
-  }
-  
-  private static parseReferrer(referrer: string) {
-    if (!referrer) {
-      return {
-        source: 'direct' as const,
-        domain: undefined
-      };
-    }
-    
-    try {
-      const url = new URL(referrer);
-      const domain = url.hostname;
-      
-      // Detect source type
-      let source: 'direct' | 'social' | 'search' | 'email' | 'ads' | 'referral' = 'referral';
-      
-      if (this.isSocialMedia(domain)) source = 'social';
-      else if (this.isSearchEngine(domain)) source = 'search';
-      else if (this.isEmailProvider(domain)) source = 'email';
-      
-      return {
-        url: referrer,
-        domain,
-        source
-      };
-    } catch {
-      return {
-        source: 'direct' as const,
-        domain: undefined
-      };
-    }
-  }
-  
-  private static isSocialMedia(domain: string): boolean {
-    const socialDomains = [
-      'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com',
-      'youtube.com', 'tiktok.com', 'pinterest.com', 'reddit.com',
-      'snapchat.com', 'telegram.org', 'whatsapp.com'
-    ];
-    return socialDomains.some(social => domain.includes(social));
-  }
-  
-  private static isSearchEngine(domain: string): boolean {
-    const searchEngines = [
-      'google.com', 'bing.com', 'yahoo.com', 'duckduckgo.com',
-      'baidu.com', 'yandex.com', 'ask.com'
-    ];
-    return searchEngines.some(search => domain.includes(search));
-  }
-  
-  private static isEmailProvider(domain: string): boolean {
-    const emailProviders = [
-      'gmail.com', 'outlook.com', 'yahoo.com', 'hotmail.com',
-      'icloud.com', 'aol.com'
-    ];
-    return emailProviders.some(email => domain.includes(email));
-  }
-  
-  private static detectBotName(userAgent: string): string | undefined {
-    const botPatterns = [
-      { pattern: /googlebot/i, name: 'Googlebot' },
-      { pattern: /bingbot/i, name: 'Bingbot' },
-      { pattern: /slurp/i, name: 'Yahoo Slurp' },
-      { pattern: /duckduckbot/i, name: 'DuckDuckBot' },
-      { pattern: /baiduspider/i, name: 'Baidu Spider' },
-      { pattern: /yandexbot/i, name: 'YandexBot' },
-      { pattern: /facebookexternalhit/i, name: 'Facebook Bot' },
-      { pattern: /twitterbot/i, name: 'TwitterBot' },
-      { pattern: /linkedinbot/i, name: 'LinkedInBot' }
-    ];
-    
-    for (const bot of botPatterns) {
-      if (bot.pattern.test(userAgent)) {
-        return bot.name;
-      }
-    }
-    
-    return undefined;
-  }
-  
-  private static async updateURLClickStats(shortCode: string) {
-    try {
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const thisWeek = new Date(today.getTime() - (7 * 24 * 60 * 60 * 1000));
-      const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-      const [totalStats, uniqueStats, todayStats, weekStats, monthStats] = await Promise.all([
-        Analytics.countDocuments({ shortCode, 'bot.isBot': false }),
-        Analytics.distinct('hashedIp', { shortCode, 'bot.isBot': false }).then(ips => ips.length),
-        Analytics.countDocuments({ 
-          shortCode, 
-          'bot.isBot': false,
-          timestamp: { $gte: today }
-        }),
-        Analytics.countDocuments({ 
-          shortCode, 
-          'bot.isBot': false,
-          timestamp: { $gte: thisWeek }
-        }),
-        Analytics.countDocuments({ 
-          shortCode, 
-          'bot.isBot': false,
-          timestamp: { $gte: thisMonth }
-        })
-      ]);
-
-      await URLModel.findOneAndUpdate(
-        { shortCode },
-        { 
-          'clicks.total': totalStats,
-          'clicks.unique': uniqueStats,
-          'clicks.today': todayStats,
-          'clicks.thisWeek': weekStats,
-          'clicks.thisMonth': monthStats,
-          'clicks.lastUpdated': now,
-          lastClickAt: now
-        }
-      );
-    } catch (error) {
-      console.error('Error updating URL click stats:', error);
-    }
-  }
-  
-  static async getAnalytics(shortCode: string, dateRange?: { start: Date; end: Date }) {
+  static async getAnalytics(shortCode: string, dateRange?: { start: Date | string; end: Date | string }) {
     const matchQuery: any = { shortCode, 'bot.isBot': false };
     
     if (dateRange) {
+      // Ensure dates are properly converted
+      const startDate = ensureDate(dateRange.start);
+      const endDate = ensureDate(dateRange.end);
+      
       matchQuery.timestamp = {
-        $gte: dateRange.start,
-        $lte: dateRange.end
+        $gte: startDate,
+        $lte: endDate
       };
     }
     
@@ -330,5 +94,61 @@ export class AnalyticsTracker {
         clicks: item.count
       }))
     };
+  }
+
+  static async recordClick(data: {
+    shortCode: string;
+    ip: string;
+    userAgent: string;
+    referrer?: string;
+    country?: string;
+    city?: string;
+    device?: any;
+  }) {
+    try {
+      // Find the URL
+      const url = await URLModel.findOne({ shortCode: data.shortCode, isDeleted: false });
+      if (!url) {
+        throw new Error('URL not found');
+      }
+
+      // Create analytics record with proper date
+      const analytics = new Analytics({
+        urlId: url._id,
+        shortCode: data.shortCode,
+        timestamp: new Date(), // Always use current date
+        ip: data.ip,
+        hashedIp: require('crypto').createHash('sha256').update(data.ip).digest('hex'),
+        userAgent: data.userAgent,
+        referrer: {
+          url: data.referrer || '',
+          domain: data.referrer ? new URL(data.referrer).hostname : '',
+          source: data.referrer ? 'external' : 'direct'
+        },
+        country: data.country || 'Unknown',
+        city: data.city || 'Unknown',
+        device: data.device || {
+          type: 'unknown',
+          browser: 'unknown',
+          os: 'unknown'
+        },
+        bot: {
+          isBot: false // You might want to add bot detection logic here
+        }
+      });
+
+      await analytics.save();
+
+      // Update URL click count
+      await URLModel.findByIdAndUpdate(url._id, {
+        $inc: { 'clicks.total': 1 },
+        'clicks.lastUpdated': new Date()
+      });
+
+      return analytics;
+    } catch (error) {
+      console.error('Error recording click:', error);
+      throw error;
+    }
   }
 }

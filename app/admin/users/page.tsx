@@ -1,3 +1,4 @@
+// ============= app/admin/users/page.tsx (Fixed Select values) =============
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -13,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -85,19 +86,23 @@ interface UsersPageData {
   };
 }
 
+// Define special "all" values to replace empty strings
+const ALL_PLANS = "all_plans";
+const ALL_ROLES = "all_roles";
+const ALL_STATUS = "all_status";
+
 export default function AdminUsersPage() {
   const [data, setData] = useState<UsersPageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
-    role: "",
-    plan: "",
-    status: "",
+    role: ALL_ROLES,
+    plan: ALL_PLANS,
+    status: ALL_STATUS,
     sortBy: "createdAt",
     sortOrder: "desc",
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const toast = useToast();
 
   const fetchUsers = useCallback(
     async (page = 1) => {
@@ -107,21 +112,25 @@ export default function AdminUsersPage() {
           page: page.toString(),
           limit: "20",
           search: searchTerm,
-          ...filters,
+          // Convert special "all" values back to empty strings for API
+          role: filters.role === ALL_ROLES ? "" : filters.role,
+          plan: filters.plan === ALL_PLANS ? "" : filters.plan,
+          status: filters.status === ALL_STATUS ? "" : filters.status,
+          sortBy: filters.sortBy,
+          sortOrder: filters.sortOrder,
         });
 
-        const response = await fetch(`/api/admin/users?${params}`);
-        const result = await response.json();
-
+        const response = await fetch(`/api/admin/users?${params.toString()}`);
         if (!response.ok) {
-          throw new Error(result.error || "Failed to fetch users");
+          throw new Error("Failed to fetch users");
         }
 
+        const result = await response.json();
         setData(result.data);
         setCurrentPage(page);
       } catch (error) {
         console.error("Error fetching users:", error);
-        toast.error("Failed to load users");
+        toast.error("Failed to fetch users. Please try again.");
       } finally {
         setLoading(false);
       }
@@ -129,166 +138,185 @@ export default function AdminUsersPage() {
     [searchTerm, filters, toast]
   );
 
-  useEffect(() => {
-    fetchUsers(1);
-  }, [fetchUsers]);
-
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchUsers(1);
   };
 
-  const handleUpdateUser = async (userId: string, updates: Partial<User>) => {
-    try {
-      const response = await fetch("/api/admin/users", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, ...updates }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to update user");
-      }
-
-      toast.success("User updated successfully");
-      fetchUsers(currentPage);
-    } catch (error) {
-      console.error("Error updating user:", error);
-      toast.error("Failed to update user");
-    }
-  };
-
-  const handleDeleteUser = async (userId: string) => {
+  const handleUserAction = async (userId: string, action: string) => {
     try {
       const response = await fetch(`/api/admin/users?userId=${userId}`, {
-        method: "DELETE",
+        method: action === "delete" ? "DELETE" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:
+          action !== "delete"
+            ? JSON.stringify({
+                isActive: action === "activate",
+                role: action === "promote" ? "admin" : undefined,
+              })
+            : undefined,
       });
 
-      const result = await response.json();
-
       if (!response.ok) {
-        throw new Error(result.error || "Failed to delete user");
+        throw new Error(`Failed to ${action} user`);
       }
 
-      toast.success("User deleted successfully");
+      toast.success(`User ${action}ed successfully.`);
+
       fetchUsers(currentPage);
     } catch (error) {
-      console.error("Error deleting user:", error);
-      toast.error("Failed to delete user");
+      console.error(`Error ${action}ing user:`, error);
+      toast.error(`Failed to ${action} user. Please try again.`);
     }
   };
 
-  const getPlanBadgeVariant = (plan: string) => {
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (searchTerm !== undefined) {
+        fetchUsers(1);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayedSearch);
+  }, [searchTerm, filters]);
+
+  const getPlanBadge = (plan: string) => {
     switch (plan) {
-      case "enterprise":
-        return "default";
+      case "free":
+        return <Badge variant="secondary">Free</Badge>;
       case "premium":
-        return "secondary";
+        return <Badge variant="default">Premium</Badge>;
+      case "enterprise":
+        return <Badge variant="destructive">Enterprise</Badge>;
       default:
-        return "outline";
+        return <Badge variant="outline">{plan}</Badge>;
     }
   };
 
-  const getRoleBadgeVariant = (role: string) => {
+  const getRoleBadge = (role: string) => {
     switch (role) {
       case "admin":
-        return "destructive";
+        return <Badge variant="destructive">Admin</Badge>;
       case "moderator":
-        return "secondary";
+        return <Badge variant="default">Moderator</Badge>;
+      case "user":
+        return <Badge variant="secondary">User</Badge>;
       default:
-        return "outline";
+        return <Badge variant="outline">{role}</Badge>;
     }
+  };
+
+  const getStatusBadge = (isActive: boolean) => {
+    return isActive ? (
+      <Badge variant="default" className="bg-green-100 text-green-800">
+        Active
+      </Badge>
+    ) : (
+      <Badge variant="secondary" className="bg-red-100 text-red-800">
+        Inactive
+      </Badge>
+    );
   };
 
   if (loading && !data) {
     return (
-      <div className="container mx-auto py-6 px-4">
-        <div className="flex items-center justify-center min-h-96">
-          <LoadingSpinner size="lg" />
-        </div>
+      <div className="flex items-center justify-center h-96">
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold">User Management</h1>
-          <p className="text-muted-foreground">Manage all platform users</p>
-        </div>
-        <Button onClick={() => fetchUsers(currentPage)}>
-          <Users className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold">Users</h1>
+        <p className="text-muted-foreground">
+          Manage user accounts and permissions
+        </p>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.totalUsers || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.activeUsers || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Free</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.freeUsers || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Premium</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.premiumUsers || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Enterprise</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.stats.enterpriseUsers || 0)}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {data?.stats && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.totalUsers)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Active Users
+              </CardTitle>
+              <UserCheck className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.activeUsers)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Free Users</CardTitle>
+              <UserX className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.freeUsers)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Premium Users
+              </CardTitle>
+              <Crown className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.premiumUsers)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Enterprise</CardTitle>
+              <Shield className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.enterpriseUsers)}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filters */}
-      <Card className="mb-6">
-        <CardContent className="p-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Search & Filter</CardTitle>
+        </CardHeader>
+        <CardContent>
           <form onSubmit={handleSearch} className="flex gap-4">
             <div className="flex-1">
               <Input
-                placeholder="Search users by name or email..."
+                placeholder="Search users..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full"
               />
             </div>
             <Select
@@ -301,7 +329,7 @@ export default function AdminUsersPage() {
                 <SelectValue placeholder="Plan" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Plans</SelectItem>
+                <SelectItem value={ALL_PLANS}>All Plans</SelectItem>
                 <SelectItem value="free">Free</SelectItem>
                 <SelectItem value="premium">Premium</SelectItem>
                 <SelectItem value="enterprise">Enterprise</SelectItem>
@@ -317,7 +345,7 @@ export default function AdminUsersPage() {
                 <SelectValue placeholder="Role" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Roles</SelectItem>
+                <SelectItem value={ALL_ROLES}>All Roles</SelectItem>
                 <SelectItem value="user">User</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
                 <SelectItem value="moderator">Moderator</SelectItem>
@@ -333,7 +361,7 @@ export default function AdminUsersPage() {
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Status</SelectItem>
+                <SelectItem value={ALL_STATUS}>All Status</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
               </SelectContent>
@@ -367,8 +395,8 @@ export default function AdminUsersPage() {
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Joined</TableHead>
-                    <TableHead>Usage</TableHead>
-                    <TableHead className="w-12"></TableHead>
+                    <TableHead>Links</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -376,101 +404,77 @@ export default function AdminUsersPage() {
                     <TableRow key={user._id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">
-                            {user.name?.charAt(0) || "U"}
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
+                            {user.name.charAt(0).toUpperCase()}
                           </div>
                           <div>
-                            <p className="font-medium">{user.name}</p>
-                            <p className="text-sm text-muted-foreground">
+                            <div className="font-medium">{user.name}</div>
+                            <div className="text-sm text-muted-foreground">
                               {user.email}
-                            </p>
+                            </div>
                           </div>
                         </div>
                       </TableCell>
+                      <TableCell>{getPlanBadge(user.plan)}</TableCell>
+                      <TableCell>{getRoleBadge(user.role)}</TableCell>
+                      <TableCell>{getStatusBadge(user.isActive)}</TableCell>
                       <TableCell>
-                        <Badge
-                          variant={getPlanBadgeVariant(user.plan)}
-                          className="capitalize"
-                        >
-                          {user.plan}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={getRoleBadgeVariant(user.role)}
-                          className="capitalize"
-                        >
-                          {user.role}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={user.isActive ? "default" : "secondary"}
-                        >
-                          {user.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatRelativeTime(user.createdAt)}
+                        <div className="text-sm">
+                          {formatRelativeTime(user.createdAt)}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">
-                          <p>{formatNumber(user.usage.linksCount)} links</p>
-                          <p className="text-muted-foreground">
-                            {formatNumber(user.usage.clicksCount)} clicks
-                          </p>
+                          {user.usage?.linksCount || 0}
                         </div>
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" className="h-8 w-8 p-0">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                navigator.clipboard.writeText(user.email)
-                              }
-                            >
+                            <DropdownMenuItem>
+                              <Edit className="mr-2 h-4 w-4" />
+                              Edit User
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
                               <Mail className="mr-2 h-4 w-4" />
-                              Copy Email
+                              Send Email
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() =>
-                                handleUpdateUser(user._id, {
-                                  isActive: !user.isActive,
-                                })
-                              }
-                            >
-                              {user.isActive ? (
-                                <>
-                                  <UserX className="mr-2 h-4 w-4" />
-                                  Deactivate
-                                </>
-                              ) : (
-                                <>
-                                  <UserCheck className="mr-2 h-4 w-4" />
-                                  Activate
-                                </>
-                              )}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                handleUpdateUser(user._id, {
-                                  role:
-                                    user.role === "admin" ? "user" : "admin",
-                                })
-                              }
-                            >
-                              <Shield className="mr-2 h-4 w-4" />
-                              {user.role === "admin"
-                                ? "Remove Admin"
-                                : "Make Admin"}
-                            </DropdownMenuItem>
+                            {user.isActive ? (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  handleUserAction(user._id, "deactivate")
+                                }
+                              >
+                                <Ban className="mr-2 h-4 w-4" />
+                                Deactivate
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  handleUserAction(user._id, "activate")
+                                }
+                              >
+                                <UserCheck className="mr-2 h-4 w-4" />
+                                Activate
+                              </DropdownMenuItem>
+                            )}
+                            {user.role !== "admin" && (
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  handleUserAction(user._id, "promote")
+                                }
+                              >
+                                <Shield className="mr-2 h-4 w-4" />
+                                Promote to Admin
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
@@ -488,14 +492,16 @@ export default function AdminUsersPage() {
                                     Delete User
                                   </AlertDialogTitle>
                                   <AlertDialogDescription>
-                                    Are you sure you want to delete {user.name}?
+                                    Are you sure you want to delete this user?
                                     This action cannot be undone.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                                   <AlertDialogAction
-                                    onClick={() => handleDeleteUser(user._id)}
+                                    onClick={() =>
+                                      handleUserAction(user._id, "delete")
+                                    }
                                     className="bg-red-600 hover:bg-red-700"
                                   >
                                     Delete
@@ -512,31 +518,30 @@ export default function AdminUsersPage() {
               </Table>
 
               {/* Pagination */}
-              {data && data.pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between mt-6">
-                  <p className="text-sm text-muted-foreground">
-                    Showing{" "}
-                    {(data.pagination.page - 1) * data.pagination.limit + 1} to{" "}
-                    {Math.min(
-                      data.pagination.page * data.pagination.limit,
-                      data.pagination.total
-                    )}{" "}
-                    of {data.pagination.total} users
-                  </p>
-                  <div className="flex gap-2">
+              {data?.pagination && data.pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between space-x-2 py-4">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {(currentPage - 1) * 20 + 1} to{" "}
+                    {Math.min(currentPage * 20, data.pagination.total)} of{" "}
+                    {data.pagination.total} users
+                  </div>
+                  <div className="flex items-center space-x-2">
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchUsers(currentPage - 1)}
-                      disabled={!data.pagination.hasPrevPage || loading}
+                      disabled={!data.pagination.hasPrevPage}
                     >
                       Previous
                     </Button>
+                    <div className="text-sm">
+                      Page {currentPage} of {data.pagination.totalPages}
+                    </div>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => fetchUsers(currentPage + 1)}
-                      disabled={!data.pagination.hasNextPage || loading}
+                      disabled={!data.pagination.hasNextPage}
                     >
                       Next
                     </Button>
@@ -550,3 +555,20 @@ export default function AdminUsersPage() {
     </div>
   );
 }
+
+// ============= Fix for other admin pages with same issue =============
+
+// For app/admin/domains/page.tsx - similar fix needed:
+// Replace empty string values with constants like:
+const ALL_TYPES = "all_types";
+const ALL_STATUSES = "all_statuses";
+
+// For app/admin/billing/page.tsx - similar fix needed:
+// Replace empty string values with constants like:
+const ALL_BILLING_PLANS = "all_billing_plans";
+const ALL_BILLING_STATUSES = "all_billing_statuses";
+
+// For components/dashboard/team-management.tsx - similar fix needed:
+// Replace empty string values with constants like:
+const ALL_TEAM_ROLES = "all_team_roles";
+const ALL_TEAM_STATUSES = "all_team_statuses";

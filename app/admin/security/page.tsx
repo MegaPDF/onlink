@@ -102,14 +102,19 @@ interface SecurityPageData {
   };
 }
 
+// Define special "all" values to replace empty strings
+const ALL_SECURITY_ACTIONS = "all_security_actions";
+const ALL_RISK_LEVELS = "all_risk_levels";
+const ALL_SECURITY_USERS = "all_security_users";
+
 export default function AdminSecurityPage() {
   const [data, setData] = useState<SecurityPageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filters, setFilters] = useState({
-    action: "",
-    riskLevel: "",
-    userId: "",
+    action: ALL_SECURITY_ACTIONS,
+    riskLevel: ALL_RISK_LEVELS,
+    userId: ALL_SECURITY_USERS,
     sortBy: "timestamp",
     sortOrder: "desc",
   });
@@ -125,7 +130,13 @@ export default function AdminSecurityPage() {
           page: page.toString(),
           limit: "20",
           search: searchTerm,
-          ...filters,
+          // Convert special "all" values back to empty strings for API
+          action: filters.action === ALL_SECURITY_ACTIONS ? "" : filters.action,
+          riskLevel:
+            filters.riskLevel === ALL_RISK_LEVELS ? "" : filters.riskLevel,
+          userId: filters.userId === ALL_SECURITY_USERS ? "" : filters.userId,
+          sortBy: filters.sortBy,
+          sortOrder: filters.sortOrder,
         });
 
         const response = await fetch(`/api/admin/security?${params}`);
@@ -139,7 +150,7 @@ export default function AdminSecurityPage() {
         setCurrentPage(page);
       } catch (error) {
         console.error("Error fetching security data:", error);
-        toast.error("Failed to load security data");
+        toast.error("Failed to load security data. Please try again.");
       } finally {
         setLoading(false);
       }
@@ -149,7 +160,17 @@ export default function AdminSecurityPage() {
 
   useEffect(() => {
     fetchSecurityData(1);
-  }, [fetchSecurityData]);
+  }, []);
+
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (searchTerm !== undefined) {
+        fetchSecurityData(1);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayedSearch);
+  }, [searchTerm, filters]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,96 +196,89 @@ export default function AdminSecurityPage() {
     return success ? "default" : "destructive";
   };
 
-  const getDeviceIcon = (userAgent: string) => {
-    if (userAgent.includes("Mobile")) {
-      return <Smartphone className="h-4 w-4" />;
-    }
-    return <Monitor className="h-4 w-4" />;
-  };
-
   if (loading && !data) {
     return (
-      <div className="container mx-auto py-6 px-4">
-        <div className="flex items-center justify-center min-h-96">
-          <LoadingSpinner size="lg" />
-        </div>
+      <div className="flex items-center justify-center h-96">
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="flex items-center justify-between mb-8">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Security Center</h1>
+          <h1 className="text-3xl font-bold">Security & Audit</h1>
           <p className="text-muted-foreground">
-            Monitor threats and audit system activity
+            Monitor system security and audit logs
           </p>
         </div>
         <Button onClick={() => fetchSecurityData(currentPage)}>
-          <Shield className="h-4 w-4 mr-2" />
+          <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
       </div>
 
-      {/* Security Stats */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Failed Logins Today
-            </CardTitle>
-            <Ban className="h-4 w-4 text-red-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">
-              {formatNumber(data?.stats.failedLoginsToday || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Suspicious Activities
-            </CardTitle>
-            <AlertTriangle className="h-4 w-4 text-yellow-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">
-              {formatNumber(data?.stats.suspiciousActivities?.length || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total Audit Logs
-            </CardTitle>
-            <Activity className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatNumber(data?.pagination.total || 0)}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              High Risk Events
-            </CardTitle>
-            <Shield className="h-4 w-4 text-red-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">
-              {formatNumber(
-                data?.stats.riskLevels?.find((r) => r.level === "high")
-                  ?.count || 0
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Stats Cards */}
+      {data?.stats && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Failed Logins Today
+              </CardTitle>
+              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.failedLoginsToday)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                High Risk Events
+              </CardTitle>
+              <Shield className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(
+                  data.stats.riskLevels
+                    .filter((r) => r.level === "high" || r.level === "critical")
+                    .reduce((sum, r) => sum + r.count, 0)
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Suspicious Activities
+              </CardTitle>
+              <Activity className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.stats.suspiciousActivities.length)}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Logs</CardTitle>
+              <Monitor className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.pagination.total)}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-3">
@@ -276,14 +290,16 @@ export default function AdminSecurityPage() {
         <TabsContent value="logs" className="space-y-6">
           {/* Filters */}
           <Card>
-            <CardContent className="p-6">
+            <CardHeader>
+              <CardTitle>Search & Filter</CardTitle>
+            </CardHeader>
+            <CardContent>
               <form onSubmit={handleSearch} className="flex gap-4">
                 <div className="flex-1">
                   <Input
                     placeholder="Search by user, action, or IP address..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full"
                   />
                 </div>
                 <Select
@@ -292,11 +308,13 @@ export default function AdminSecurityPage() {
                     setFilters((prev) => ({ ...prev, action: value }))
                   }
                 >
-                  <SelectTrigger className="w-32">
+                  <SelectTrigger className="w-40">
                     <SelectValue placeholder="Action" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Actions</SelectItem>
+                    <SelectItem value={ALL_SECURITY_ACTIONS}>
+                      All Actions
+                    </SelectItem>
                     <SelectItem value="login">Login</SelectItem>
                     <SelectItem value="logout">Logout</SelectItem>
                     <SelectItem value="create">Create</SelectItem>
@@ -310,11 +328,11 @@ export default function AdminSecurityPage() {
                     setFilters((prev) => ({ ...prev, riskLevel: value }))
                   }
                 >
-                  <SelectTrigger className="w-32">
+                  <SelectTrigger className="w-40">
                     <SelectValue placeholder="Risk" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Risks</SelectItem>
+                    <SelectItem value={ALL_RISK_LEVELS}>All Risks</SelectItem>
                     <SelectItem value="low">Low</SelectItem>
                     <SelectItem value="medium">Medium</SelectItem>
                     <SelectItem value="high">High</SelectItem>
@@ -373,36 +391,32 @@ export default function AdminSecurityPage() {
                             <div>
                               <p className="font-medium">{log.resource}</p>
                               {log.resourceId && (
-                                <p className="text-sm text-muted-foreground font-mono">
-                                  {log.resourceId.slice(-8)}
+                                <p className="text-sm text-muted-foreground">
+                                  ID: {log.resourceId.substring(0, 8)}...
                                 </p>
                               )}
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1 text-sm">
-                                <MapPin className="h-3 w-3" />
+                            <div className="text-sm">
+                              <p className="flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />
                                 {log.context.ip}
-                              </div>
-                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                {getDeviceIcon(log.context.userAgent)}
-                                {log.context.userAgent.slice(0, 30)}...
-                              </div>
+                              </p>
+                              <p className="text-muted-foreground truncate max-w-[150px]">
+                                {log.context.userAgent}
+                              </p>
                             </div>
                           </TableCell>
                           <TableCell>
                             <Badge
                               variant={getRiskBadgeVariant(log.risk.level)}
-                              className="capitalize"
                             >
-                              {log.risk.level}
+                              {log.risk.level.toUpperCase()}
                             </Badge>
-                            {log.risk.factors.length > 0 && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {log.risk.factors.slice(0, 2).join(", ")}
-                              </p>
-                            )}
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Score: {log.risk.score}
+                            </p>
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -418,8 +432,10 @@ export default function AdminSecurityPage() {
                               </p>
                             )}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {formatRelativeTime(log.timestamp)}
+                          <TableCell>
+                            <div className="text-sm">
+                              {formatRelativeTime(log.timestamp)}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -427,32 +443,30 @@ export default function AdminSecurityPage() {
                   </Table>
 
                   {/* Pagination */}
-                  {data && data.pagination.totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-6">
-                      <p className="text-sm text-muted-foreground">
-                        Showing{" "}
-                        {(data.pagination.page - 1) * data.pagination.limit + 1}{" "}
-                        to{" "}
-                        {Math.min(
-                          data.pagination.page * data.pagination.limit,
-                          data.pagination.total
-                        )}{" "}
-                        of {data.pagination.total} logs
-                      </p>
-                      <div className="flex gap-2">
+                  {data?.pagination && data.pagination.totalPages > 1 && (
+                    <div className="flex items-center justify-between space-x-2 py-4">
+                      <div className="text-sm text-muted-foreground">
+                        Showing {(currentPage - 1) * 20 + 1} to{" "}
+                        {Math.min(currentPage * 20, data.pagination.total)} of{" "}
+                        {data.pagination.total} logs
+                      </div>
+                      <div className="flex items-center space-x-2">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => fetchSecurityData(currentPage - 1)}
-                          disabled={!data.pagination.hasPrevPage || loading}
+                          disabled={!data.pagination.hasPrevPage}
                         >
                           Previous
                         </Button>
+                        <div className="text-sm">
+                          Page {currentPage} of {data.pagination.totalPages}
+                        </div>
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => fetchSecurityData(currentPage + 1)}
-                          disabled={!data.pagination.hasNextPage || loading}
+                          disabled={!data.pagination.hasNextPage}
                         >
                           Next
                         </Button>
@@ -468,58 +482,37 @@ export default function AdminSecurityPage() {
         <TabsContent value="suspicious" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                Suspicious Activities
-              </CardTitle>
+              <CardTitle>Suspicious Activities</CardTitle>
               <CardDescription>
-                High-risk activities that require attention
+                High-risk events that require attention
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {data?.stats.suspiciousActivities?.length === 0 ? (
+              {data?.stats.suspiciousActivities.length === 0 ? (
                 <EmptyState
                   icon={Shield}
                   title="No suspicious activities"
-                  description="All activities are within normal parameters."
+                  description="All recent activities appear normal."
                 />
               ) : (
                 <div className="space-y-4">
-                  {data?.stats.suspiciousActivities?.map((activity) => (
-                    <div key={activity._id} className="border rounded-lg p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="destructive">High Risk</Badge>
-                            <span className="font-medium">
-                              {activity.action}
-                            </span>
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            User: {activity.userName || "Anonymous"} (
-                            {activity.userEmail})
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            IP: {activity.context.ip} •{" "}
-                            {formatRelativeTime(activity.timestamp)}
-                          </p>
-                          <div className="flex gap-2 flex-wrap">
-                            {activity.risk.factors.map((factor, index) => (
-                              <Badge
-                                key={index}
-                                variant="outline"
-                                className="text-xs"
-                              >
-                                {factor.replace("_", " ")}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                        <Button variant="outline" size="sm">
-                          <Eye className="h-4 w-4 mr-2" />
-                          Investigate
-                        </Button>
+                  {data?.stats.suspiciousActivities.map((activity) => (
+                    <div
+                      key={activity._id}
+                      className="flex items-center justify-between p-4 border rounded-lg"
+                    >
+                      <div>
+                        <p className="font-medium">
+                          {activity.userName || "Anonymous"} - {activity.action}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {activity.context.ip} •{" "}
+                          {formatRelativeTime(activity.timestamp)}
+                        </p>
                       </div>
+                      <Badge variant={getRiskBadgeVariant(activity.risk.level)}>
+                        {activity.risk.level.toUpperCase()}
+                      </Badge>
                     </div>
                   ))}
                 </div>
@@ -530,53 +523,38 @@ export default function AdminSecurityPage() {
 
         <TabsContent value="analytics" className="space-y-6">
           <div className="grid gap-6 md:grid-cols-2">
-            {/* Risk Levels */}
             <Card>
               <CardHeader>
                 <CardTitle>Risk Level Distribution</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {data?.stats.riskLevels?.map((risk) => (
+                <div className="space-y-2">
+                  {data?.stats.riskLevels.map((risk) => (
                     <div
                       key={risk.level}
                       className="flex items-center justify-between"
                     >
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={getRiskBadgeVariant(risk.level)}
-                          className="capitalize"
-                        >
-                          {risk.level}
-                        </Badge>
-                      </div>
-                      <span className="font-mono text-sm">
-                        {formatNumber(risk.count)}
-                      </span>
+                      <span className="capitalize">{risk.level}</span>
+                      <span className="font-medium">{risk.count}</span>
                     </div>
                   ))}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Top Actions */}
             <Card>
               <CardHeader>
-                <CardTitle>Most Common Actions</CardTitle>
+                <CardTitle>Top Actions</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {data?.stats.topActions?.map((action) => (
+                <div className="space-y-2">
+                  {data?.stats.topActions.map((action) => (
                     <div
                       key={action.action}
                       className="flex items-center justify-between"
                     >
-                      <span className="font-medium capitalize">
-                        {action.action.replace("_", " ")}
-                      </span>
-                      <span className="font-mono text-sm">
-                        {formatNumber(action.count)}
-                      </span>
+                      <span>{action.action}</span>
+                      <span className="font-medium">{action.count}</span>
                     </div>
                   ))}
                 </div>

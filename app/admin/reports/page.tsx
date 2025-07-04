@@ -9,7 +9,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -21,28 +20,12 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
-import {
   FileText,
   Download,
   TrendingUp,
   Users,
-  Link as LinkIcon,
   DollarSign,
-  Calendar,
-  RefreshCw,
+  Activity,
 } from "lucide-react";
 import { formatNumber, formatCurrency } from "@/lib/utils";
 
@@ -52,22 +35,22 @@ interface ReportData {
     totalLinks: number;
     totalClicks: number;
     totalRevenue: number;
-    growthMetrics: {
-      usersGrowth: number;
-      linksGrowth: number;
-      clicksGrowth: number;
-      revenueGrowth: number;
+    growth: {
+      users: number;
+      links: number;
+      clicks: number;
+      revenue: number;
     };
   };
   userAnalytics: {
-    usersByPlan: { plan: string; count: number; revenue: number }[];
-    userGrowth: { date: string; users: number; premium: number }[];
-    userActivity: { date: string; active: number; new: number }[];
+    newUsers: { date: string; count: number }[];
+    usersByPlan: { plan: string; count: number }[];
+    retention: { cohort: string; retention: number }[];
   };
   linkAnalytics: {
-    linksByDomain: { domain: string; count: number; clicks: number }[];
-    linkGrowth: { date: string; links: number; clicks: number }[];
-    topPerformingLinks: { shortCode: string; clicks: number; title?: string }[];
+    linksCreated: { date: string; count: number }[];
+    clicksOverTime: { date: string; clicks: number }[];
+    topDomains: { domain: string; count: number }[];
   };
   revenueAnalytics: {
     revenueByPlan: { plan: string; revenue: number; count: number }[];
@@ -76,12 +59,15 @@ interface ReportData {
   };
 }
 
-const COLORS = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"];
+// Define special values to replace empty strings
+const REPORT_7_DAYS = "7";
+const REPORT_30_DAYS = "30";
+const REPORT_90_DAYS = "90";
 
 export default function AdminReportsPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState("30");
+  const [dateRange, setDateRange] = useState(REPORT_30_DAYS);
   const [activeTab, setActiveTab] = useState("overview");
   const toast = useToast();
 
@@ -102,7 +88,7 @@ export default function AdminReportsPage() {
       setData(result.data);
     } catch (error) {
       console.error("Error fetching reports:", error);
-      toast.error("Failed to load reports");
+      toast.error("Failed to load reports. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -129,23 +115,22 @@ export default function AdminReportsPage() {
       toast.success(`Report exported as ${type.toUpperCase()}`);
     } catch (error) {
       console.error("Export error:", error);
-      toast.error("Export failed");
+      toast.error("Export failed. Please try again.");
     }
   };
 
   if (loading) {
     return (
-      <div className="container mx-auto py-6 px-4">
-        <div className="flex items-center justify-center min-h-96">
-          <LoadingSpinner size="lg" />
-        </div>
+      <div className="flex items-center justify-center h-96">
+        <LoadingSpinner size="lg" />
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="flex items-center justify-between mb-8">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Reports & Analytics</h1>
           <p className="text-muted-foreground">
@@ -158,15 +143,14 @@ export default function AdminReportsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="7">7 Days</SelectItem>
-              <SelectItem value="30">30 Days</SelectItem>
-              <SelectItem value="90">90 Days</SelectItem>
-              <SelectItem value="365">1 Year</SelectItem>
+              <SelectItem value={REPORT_7_DAYS}>7 Days</SelectItem>
+              <SelectItem value={REPORT_30_DAYS}>30 Days</SelectItem>
+              <SelectItem value={REPORT_90_DAYS}>90 Days</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={fetchReports}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
+          <Button onClick={() => exportReport("csv")}>
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
           </Button>
           <Button onClick={() => exportReport("pdf")}>
             <Download className="h-4 w-4 mr-2" />
@@ -175,318 +159,261 @@ export default function AdminReportsPage() {
         </div>
       </div>
 
-      {data && (
-        <>
-          {/* Overview Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+      {/* Overview Stats */}
+      {data?.overview && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.overview.totalUsers)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                +{data.overview.growth.users}% from last period
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Links</CardTitle>
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.overview.totalLinks)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                +{data.overview.growth.links}% from last period
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total Clicks
+              </CardTitle>
+              <Activity className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatNumber(data.overview.totalClicks)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                +{data.overview.growth.clicks}% from last period
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total Revenue
+              </CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatCurrency(data.overview.totalRevenue)}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                +{data.overview.growth.revenue}% from last period
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="links">Links</TabsTrigger>
+          <TabsTrigger value="revenue">Revenue</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total Users
-                </CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
+              <CardHeader>
+                <CardTitle>Users by Plan</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {formatNumber(data.overview.totalUsers)}
-                </div>
-                <div className="flex items-center text-xs text-muted-foreground">
-                  <TrendingUp className="h-3 w-3 mr-1" />
-                  {data.overview.growthMetrics.usersGrowth > 0 ? "+" : ""}
-                  {data.overview.growthMetrics.usersGrowth.toFixed(1)}% vs prev
-                  period
+                <div className="space-y-2">
+                  {data?.userAnalytics.usersByPlan.map((item) => (
+                    <div
+                      key={item.plan}
+                      className="flex items-center justify-between"
+                    >
+                      <span className="capitalize">{item.plan}</span>
+                      <span className="font-medium">
+                        {formatNumber(item.count)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total Links
-                </CardTitle>
-                <LinkIcon className="h-4 w-4 text-muted-foreground" />
+              <CardHeader>
+                <CardTitle>Top Domains</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {formatNumber(data.overview.totalLinks)}
-                </div>
-                <div className="flex items-center text-xs text-muted-foreground">
-                  <TrendingUp className="h-3 w-3 mr-1" />
-                  {data.overview.growthMetrics.linksGrowth > 0 ? "+" : ""}
-                  {data.overview.growthMetrics.linksGrowth.toFixed(1)}% vs prev
-                  period
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total Clicks
-                </CardTitle>
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {formatNumber(data.overview.totalClicks)}
-                </div>
-                <div className="flex items-center text-xs text-muted-foreground">
-                  <TrendingUp className="h-3 w-3 mr-1" />
-                  {data.overview.growthMetrics.clicksGrowth > 0 ? "+" : ""}
-                  {data.overview.growthMetrics.clicksGrowth.toFixed(1)}% vs prev
-                  period
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total Revenue
-                </CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {formatCurrency(data.overview.totalRevenue)}
-                </div>
-                <div className="flex items-center text-xs text-muted-foreground">
-                  <TrendingUp className="h-3 w-3 mr-1" />
-                  {data.overview.growthMetrics.revenueGrowth > 0 ? "+" : ""}
-                  {data.overview.growthMetrics.revenueGrowth.toFixed(1)}% vs
-                  prev period
+                <div className="space-y-2">
+                  {data?.linkAnalytics.topDomains.map((item) => (
+                    <div
+                      key={item.domain}
+                      className="flex items-center justify-between"
+                    >
+                      <span>{item.domain}</span>
+                      <span className="font-medium">
+                        {formatNumber(item.count)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="users">Users</TabsTrigger>
-              <TabsTrigger value="links">Links</TabsTrigger>
-              <TabsTrigger value="revenue">Revenue</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="overview" className="space-y-6">
+        <TabsContent value="users" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>User Analytics</CardTitle>
+              <CardDescription>
+                Detailed user registration and retention metrics
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>User Growth</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={data.userAnalytics.userGrowth}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis />
-                        <Tooltip />
-                        <Line
-                          type="monotone"
-                          dataKey="users"
-                          stroke="#3B82F6"
-                          strokeWidth={2}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="premium"
-                          stroke="#10B981"
-                          strokeWidth={2}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Revenue Growth</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={data.revenueAnalytics.revenueGrowth}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis />
-                        <Tooltip />
-                        <Line
-                          type="monotone"
-                          dataKey="revenue"
-                          stroke="#EF4444"
-                          strokeWidth={2}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="mrr"
-                          stroke="#F59E0B"
-                          strokeWidth={2}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
+                <div>
+                  <h4 className="font-medium mb-2">New User Registrations</h4>
+                  <div className="space-y-2">
+                    {data?.userAnalytics.newUsers.slice(0, 7).map((item) => (
+                      <div
+                        key={item.date}
+                        className="flex items-center justify-between text-sm"
+                      >
+                        <span>{item.date}</span>
+                        <span>{item.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium mb-2">User Retention</h4>
+                  <div className="space-y-2">
+                    {data?.userAnalytics.retention.map((item) => (
+                      <div
+                        key={item.cohort}
+                        className="flex items-center justify-between text-sm"
+                      >
+                        <span>{item.cohort}</span>
+                        <span>{item.retention}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </TabsContent>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            <TabsContent value="users" className="space-y-6">
+        <TabsContent value="links" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Link Analytics</CardTitle>
+              <CardDescription>
+                Link creation and engagement metrics
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Users by Plan</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={data.userAnalytics.usersByPlan}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ plan, count }) => `${plan}: ${count}`}
-                          outerRadius={80}
-                          fill="#8884d8"
-                          dataKey="count"
+                <div>
+                  <h4 className="font-medium mb-2">Links Created Daily</h4>
+                  <div className="space-y-2">
+                    {data?.linkAnalytics.linksCreated
+                      .slice(0, 7)
+                      .map((item) => (
+                        <div
+                          key={item.date}
+                          className="flex items-center justify-between text-sm"
                         >
-                          {data.userAnalytics.usersByPlan.map(
-                            (entry, index) => (
-                              <Cell
-                                key={`cell-${index}`}
-                                fill={COLORS[index % COLORS.length]}
-                              />
-                            )
-                          )}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>User Activity</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={data.userAnalytics.userActivity}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis />
-                        <Tooltip />
-                        <Bar dataKey="active" fill="#3B82F6" />
-                        <Bar dataKey="new" fill="#10B981" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
+                          <span>{item.date}</span>
+                          <span>{item.count}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium mb-2">Daily Clicks</h4>
+                  <div className="space-y-2">
+                    {data?.linkAnalytics.clicksOverTime
+                      .slice(0, 7)
+                      .map((item) => (
+                        <div
+                          key={item.date}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span>{item.date}</span>
+                          <span>{formatNumber(item.clicks)}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
               </div>
-            </TabsContent>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            <TabsContent value="links" className="space-y-6">
+        <TabsContent value="revenue" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Revenue Analytics</CardTitle>
+              <CardDescription>
+                Revenue breakdown and growth metrics
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Links by Domain</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={data.linkAnalytics.linksByDomain}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="domain" />
-                        <YAxis />
-                        <Tooltip />
-                        <Bar dataKey="count" fill="#3B82F6" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Top Performing Links</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {data.linkAnalytics.topPerformingLinks.map(
-                        (link, index) => (
-                          <div
-                            key={link.shortCode}
-                            className="flex items-center justify-between"
-                          >
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline">{index + 1}</Badge>
-                              <div>
-                                <p className="font-medium">
-                                  {link.title || link.shortCode}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                  {link.shortCode}
-                                </p>
-                              </div>
-                            </div>
-                            <span className="font-mono text-sm">
-                              {formatNumber(link.clicks)} clicks
-                            </span>
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                <div>
+                  <h4 className="font-medium mb-2">Revenue by Plan</h4>
+                  <div className="space-y-2">
+                    {data?.revenueAnalytics.revenueByPlan.map((item) => (
+                      <div
+                        key={item.plan}
+                        className="flex items-center justify-between text-sm"
+                      >
+                        <span className="capitalize">{item.plan}</span>
+                        <span>{formatCurrency(item.revenue)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium mb-2">Churn Analysis</h4>
+                  <div className="space-y-2">
+                    {data?.revenueAnalytics.churnAnalysis
+                      .slice(0, 7)
+                      .map((item) => (
+                        <div
+                          key={item.date}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span>{item.date}</span>
+                          <span>{item.churn}%</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
               </div>
-            </TabsContent>
-
-            <TabsContent value="revenue" className="space-y-6">
-              <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Revenue by Plan</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={data.revenueAnalytics.revenueByPlan}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="plan" />
-                        <YAxis />
-                        <Tooltip />
-                        <Bar dataKey="revenue" fill="#EF4444" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Churn Analysis</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={data.revenueAnalytics.churnAnalysis}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis />
-                        <Tooltip />
-                        <Line
-                          type="monotone"
-                          dataKey="churn"
-                          stroke="#EF4444"
-                          strokeWidth={2}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="retention"
-                          stroke="#10B981"
-                          strokeWidth={2}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </>
-      )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

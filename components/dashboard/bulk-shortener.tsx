@@ -92,21 +92,25 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
     return true;
   };
 
-  const handleFileUpload = useCallback((file: File) => {
-    if (!file.type.includes("csv") && !file.name.endsWith(".csv")) {
-      toast.error("Please upload a CSV file");
-      return;
-    }
+  const handleFileUpload = useCallback(
+    (file: File) => {
+      if (!file.type.includes("csv") && !file.name.endsWith(".csv")) {
+        toast.error("Please upload a CSV file");
+        return;
+      }
 
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit
-      toast.error("File size must be less than 5MB");
-      return;
-    }
+      if (file.size > 5 * 1024 * 1024) {
+        // 5MB limit
+        toast.error("File size must be less than 5MB");
+        return;
+      }
 
-    setSelectedFile(file);
-    setResults([]);
-    toast.success("File uploaded successfully");
-  }, [toast]);
+      setSelectedFile(file);
+      setResults([]);
+      toast.success("File uploaded successfully");
+    },
+    [toast]
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -156,7 +160,7 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
 
     try {
       const formData = new FormData();
-      
+
       if (activeTab === "csv" && selectedFile) {
         formData.append("file", selectedFile);
       } else {
@@ -171,7 +175,10 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
       }
 
       if (tags) {
-        const tagArray = tags.split(",").map(tag => tag.trim()).filter(Boolean);
+        const tagArray = tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean);
         formData.append("tags", JSON.stringify(tagArray));
       }
 
@@ -191,7 +198,7 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
           failed: result.results.length - result.successful,
         });
         setProgress(100);
-        
+
         toast.success(
           `Bulk operation completed! ${result.successful}/${result.results.length} URLs processed successfully`
         );
@@ -214,23 +221,25 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
     // Parse CSV to extract URLs
     try {
       const text = await selectedFile.text();
-      const lines = text.split("\n").filter(line => line.trim());
-      
+      const lines = text.split("\n").filter((line) => line.trim());
+
       // Extract URLs from CSV (support different column names)
       const urls: string[] = [];
-      
+
       lines.forEach((line, index) => {
         if (index === 0) {
           // Skip header if it doesn't look like a URL
           if (!line.includes("http")) return;
         }
-        
+
         // Split by comma and find URL-like values
-        const cells = line.split(",").map(cell => cell.trim().replace(/"/g, ""));
-        const urlCell = cells.find(cell => 
-          cell.startsWith("http://") || cell.startsWith("https://")
+        const cells = line
+          .split(",")
+          .map((cell) => cell.trim().replace(/"/g, ""));
+        const urlCell = cells.find(
+          (cell) => cell.startsWith("http://") || cell.startsWith("https://")
         );
-        
+
         if (urlCell) {
           urls.push(urlCell);
         }
@@ -249,10 +258,12 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
     }
 
     // Parse text input for URLs
-    const lines = textInput.split("\n").filter(line => line.trim());
+    const lines = textInput.split("\n").filter((line) => line.trim());
     const urls = lines
-      .map(line => line.trim())
-      .filter(line => line.startsWith("http://") || line.startsWith("https://"));
+      .map((line) => line.trim())
+      .filter(
+        (line) => line.startsWith("http://") || line.startsWith("https://")
+      );
 
     if (urls.length === 0) {
       toast.error("No valid URLs found");
@@ -264,8 +275,8 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
 
   const copyAllShortUrls = () => {
     const successfulUrls = results
-      .filter(result => result.shortUrl)
-      .map(result => result.shortUrl)
+      .filter((result) => result.shortUrl)
+      .map((result) => result.shortUrl)
       .join("\n");
 
     if (successfulUrls) {
@@ -282,23 +293,27 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
 
     const csvContent = [
       "Original URL,Short URL,Short Code,Status,Error",
-      ...results.map(result => {
+      ...results.map((result) => {
         const status = result.shortUrl ? "Success" : "Failed";
         const error = result.error || "";
-        return `"${result.originalUrl}","${result.shortUrl || ""}","${result.shortCode || ""}","${status}","${error}"`;
-      })
+        return `"${result.originalUrl}","${result.shortUrl || ""}","${
+          result.shortCode || ""
+        }","${status}","${error}"`;
+      }),
     ].join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv" });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `bulk-shorten-results-${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = `bulk-shorten-results-${
+      new Date().toISOString().split("T")[0]
+    }.csv`;
     document.body.appendChild(a);
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
-    
+
     toast.success("Results exported successfully");
   };
 
@@ -428,11 +443,14 @@ export function BulkShortener({ folders = [] }: BulkShortenerProps) {
                   </div>
                 )}
               </div>
-              
+
               <div className="bg-muted/50 p-4 rounded-lg">
                 <h4 className="font-medium mb-2">CSV Format Requirements:</h4>
                 <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• Column header should be "url", "URL", "link", or "originalUrl"</li>
+                  <li>
+                    • Column header should be "url", "URL", "link", or
+                    "originalUrl"
+                  </li>
                   <li>• One URL per row</li>
                   <li>• Maximum 100 URLs per file</li>
                   <li>• File size limit: 5MB</li>
@@ -555,7 +573,11 @@ https://example.com/page3`}
               </div>
               <div className="flex items-center gap-2">
                 {processingStats.successful > 0 && (
-                  <Button variant="outline" size="sm" onClick={copyAllShortUrls}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyAllShortUrls}
+                  >
                     <Copy className="h-4 w-4 mr-2" />
                     Copy All Short URLs
                   </Button>
@@ -571,7 +593,9 @@ https://example.com/page3`}
             {/* Stats Summary */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <div className="text-center p-3 bg-muted/50 rounded-lg">
-                <div className="text-2xl font-bold">{processingStats.total}</div>
+                <div className="text-2xl font-bold">
+                  {processingStats.total}
+                </div>
                 <div className="text-xs text-muted-foreground">Total URLs</div>
               </div>
               <div className="text-center p-3 bg-green-50 rounded-lg">
@@ -589,10 +613,16 @@ https://example.com/page3`}
               <div className="text-center p-3 bg-blue-50 rounded-lg">
                 <div className="text-2xl font-bold text-blue-600">
                   {processingStats.total > 0
-                    ? Math.round((processingStats.successful / processingStats.total) * 100)
-                    : 0}%
+                    ? Math.round(
+                        (processingStats.successful / processingStats.total) *
+                          100
+                      )
+                    : 0}
+                  %
                 </div>
-                <div className="text-xs text-muted-foreground">Success Rate</div>
+                <div className="text-xs text-muted-foreground">
+                  Success Rate
+                </div>
               </div>
             </div>
 
@@ -618,7 +648,10 @@ https://example.com/page3`}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="max-w-[300px] truncate" title={result.originalUrl}>
+                        <div
+                          className="max-w-[300px] truncate"
+                          title={result.originalUrl}
+                        >
                           {result.originalUrl}
                         </div>
                       </TableCell>
@@ -646,7 +679,9 @@ https://example.com/page3`}
                       </TableCell>
                       <TableCell>
                         {result.error ? (
-                          <span className="text-red-600 text-sm">{result.error}</span>
+                          <span className="text-red-600 text-sm">
+                            {result.error}
+                          </span>
                         ) : (
                           <span className="text-muted-foreground">-</span>
                         )}
@@ -656,7 +691,9 @@ https://example.com/page3`}
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => window.open(result.shortUrl, "_blank")}
+                            onClick={() =>
+                              window.open(result.shortUrl, "_blank")
+                            }
                           >
                             <Globe className="h-4 w-4" />
                           </Button>
@@ -684,8 +721,9 @@ https://example.com/page3`}
                   Upgrade to Premium for Bulk Operations
                 </h3>
                 <p className="text-sm text-orange-700 mt-1">
-                  Process up to 100 URLs at once, organize with folders, and access
-                  advanced analytics. Upgrade now to unlock bulk shortening.
+                  Process up to 100 URLs at once, organize with folders, and
+                  access advanced analytics. Upgrade now to unlock bulk
+                  shortening.
                 </p>
               </div>
               <Button className="bg-orange-600 hover:bg-orange-700">
