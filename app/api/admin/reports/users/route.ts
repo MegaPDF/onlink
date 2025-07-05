@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
+import { User } from "@/models/User";
+import { URL as URLModel } from "@/models/URL";
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,7 +25,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { db } = await connectDB();
+    await connectDB();
 
     // Date range filter
     const dateFilter = {
@@ -34,8 +36,8 @@ export async function GET(req: NextRequest) {
     };
 
     // 1. Users by Plan
-    const usersByPlan = await db.collection("users").aggregate([
-      { $match: dateFilter },
+    const usersByPlan = await User.aggregate([
+      { $match: { ...dateFilter, isDeleted: false } },
       {
         $group: {
           _id: "$plan",
@@ -44,11 +46,32 @@ export async function GET(req: NextRequest) {
       },
       {
         $lookup: {
-          from: "subscriptions",
+          from: "users",
           let: { plan: "$_id" },
           pipeline: [
-            { $match: { $expr: { $eq: ["$plan", "$$plan"] } } },
-            { $group: { _id: null, revenue: { $sum: "$amount" } } },
+            { 
+              $match: { 
+                $expr: { $eq: ["$plan", "$$plan"] },
+                isDeleted: false,
+                plan: { $in: ["premium", "enterprise"] }
+              } 
+            },
+            { 
+              $group: { 
+                _id: null, 
+                revenue: { 
+                  $sum: {
+                    $switch: {
+                      branches: [
+                        { case: { $eq: ["$plan", "premium"] }, then: 9 },
+                        { case: { $eq: ["$plan", "enterprise"] }, then: 29 }
+                      ],
+                      default: 0
+                    }
+                  }
+                } 
+              } 
+            },
           ],
           as: "revenueData",
         },
@@ -62,11 +85,11 @@ export async function GET(req: NextRequest) {
         },
       },
       { $sort: { count: -1 } },
-    ]).toArray();
+    ]);
 
     // 2. User Growth (daily data points)
-    const userGrowth = await db.collection("users").aggregate([
-      { $match: dateFilter },
+    const userGrowth = await User.aggregate([
+      { $match: { ...dateFilter, isDeleted: false } },
       {
         $group: {
           _id: {
@@ -89,115 +112,173 @@ export async function GET(req: NextRequest) {
         },
       },
       { $sort: { date: 1 } },
-    ]).toArray();
-
-    // 3. User Activity (daily active users and new registrations)
-    const userActivity = await Promise.all([
-      // Daily new users
-      db.collection("users").aggregate([
-        { $match: dateFilter },
-        {
-          $group: {
-            _id: {
-              date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-            },
-            new: { $sum: 1 },
-          },
-        },
-        {
-          $project: {
-            date: "$_id.date",
-            new: 1,
-            _id: 0,
-          },
-        },
-        { $sort: { date: 1 } },
-      ]).toArray(),
-
-      // Daily active users (users who created links or had clicks)
-      db.collection("urls").aggregate([
-        { $match: dateFilter },
-        {
-          $group: {
-            _id: {
-              date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-              userId: "$userId",
-            },
-          },
-        },
-        {
-          $group: {
-            _id: "$_id.date",
-            active: { $sum: 1 },
-          },
-        },
-        {
-          $project: {
-            date: "$_id",
-            active: 1,
-            _id: 0,
-          },
-        },
-        { $sort: { date: 1 } },
-      ]).toArray(),
     ]);
 
-    // Merge activity data
-    const activityMap = new Map();
-    
-    // Add new users
-    userActivity[0].forEach((item) => {
-      activityMap.set(item.date, { date: item.date, new: item.new, active: 0 });
-    });
-
-    // Add active users
-    userActivity[1].forEach((item) => {
-      const existing = activityMap.get(item.date) || { date: item.date, new: 0, active: 0 };
-      existing.active = item.active;
-      activityMap.set(item.date, existing);
-    });
-
-    const userActivityData = Array.from(activityMap.values()).sort((a, b) => 
-      a.date.localeCompare(b.date)
-    );
-
-    // 4. Fill in missing dates for consistent chart data
-    const fillMissingDates = (data: any[], dateField: string = 'date') => {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const filledData: any[] = [];
-      const dataMap = new Map(data.map(item => [item[dateField], item]));
-
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split('T')[0];
-        filledData.push(dataMap.get(dateStr) || {
-          [dateField]: dateStr,
-          ...(data[0] ? Object.keys(data[0]).reduce((acc, key) => {
-            if (key !== dateField) acc[key] = 0;
-            return acc;
-          }, {} as any) : {})
-        });
+    // 3. User Activity Analysis
+    const userActivity = await User.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $lookup: {
+          from: "urls",
+          localField: "_id",
+          foreignField: "userId",
+          as: "urls"
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          email: 1,
+          plan: 1,
+          createdAt: 1,
+          lastLoginAt: 1,
+          isActive: 1,
+          urlCount: { $size: { $filter: { input: "$urls", cond: { $eq: ["$$this.isDeleted", false] } } } },
+          totalClicks: { $sum: "$urls.clicks.total" }
+        }
+      },
+      {
+        $addFields: {
+          activityLevel: {
+            $switch: {
+              branches: [
+                { case: { $gte: ["$urlCount", 10] }, then: "high" },
+                { case: { $gte: ["$urlCount", 3] }, then: "medium" },
+                { case: { $gt: ["$urlCount", 0] }, then: "low" }
+              ],
+              default: "inactive"
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: "$activityLevel",
+          count: { $sum: 1 },
+          avgUrls: { $avg: "$urlCount" },
+          avgClicks: { $avg: "$totalClicks" }
+        }
+      },
+      {
+        $project: {
+          activityLevel: "$_id",
+          count: 1,
+          avgUrls: { $round: ["$avgUrls", 2] },
+          avgClicks: { $round: ["$avgClicks", 2] },
+          _id: 0
+        }
       }
+    ]);
 
-      return filledData;
-    };
+    // 4. Top Users by Activity
+    const topUsers = await User.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $lookup: {
+          from: "urls",
+          localField: "_id",
+          foreignField: "userId",
+          as: "urls"
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          email: 1,
+          plan: 1,
+          createdAt: 1,
+          urlCount: { $size: { $filter: { input: "$urls", cond: { $eq: ["$$this.isDeleted", false] } } } },
+          totalClicks: { $sum: "$urls.clicks.total" }
+        }
+      },
+      { $sort: { totalClicks: -1, urlCount: -1 } },
+      { $limit: 10 }
+    ]);
 
-    const responseData = {
-      usersByPlan,
-      userGrowth: fillMissingDates(userGrowth),
-      userActivity: fillMissingDates(userActivityData),
-    };
+    // 5. Registration Trends by Month
+    const registrationTrends = await User.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" },
+          },
+          totalRegistrations: { $sum: 1 },
+          premiumRegistrations: {
+            $sum: {
+              $cond: [{ $in: ["$plan", ["premium", "enterprise"]] }, 1, 0],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          period: {
+            $concat: [
+              { $toString: "$_id.year" },
+              "-",
+              {
+                $cond: [
+                  { $lt: ["$_id.month", 10] },
+                  { $concat: ["0", { $toString: "$_id.month" }] },
+                  { $toString: "$_id.month" },
+                ],
+              },
+            ],
+          },
+          totalRegistrations: 1,
+          premiumRegistrations: 1,
+          _id: 0,
+        },
+      },
+      { $sort: { period: 1 } },
+      { $limit: 12 }, // Last 12 months
+    ]);
+
+    // 6. User Demographics (if available)
+    const userDemographics = await User.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $group: {
+          _id: {
+            plan: "$plan",
+            isEmailVerified: "$isEmailVerified",
+            isActive: "$isActive"
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          plan: "$_id.plan",
+          isEmailVerified: "$_id.isEmailVerified",
+          isActive: "$_id.isActive",
+          count: 1,
+          _id: 0
+        }
+      },
+      { $sort: { plan: 1 } }
+    ]);
 
     return NextResponse.json({
       success: true,
-      data: responseData,
+      data: {
+        usersByPlan,
+        userGrowth,
+        userActivity,
+        topUsers,
+        registrationTrends,
+        userDemographics,
+        period: {
+          startDate,
+          endDate,
+        },
+      },
     });
-
   } catch (error) {
     console.error("Error fetching user reports:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

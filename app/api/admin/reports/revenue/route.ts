@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
+import { User } from "@/models/User";
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { db } = await connectDB();
+    await connectDB();
 
     // Date range filter
     const dateFilter = {
@@ -33,19 +34,30 @@ export async function GET(req: NextRequest) {
       },
     };
 
-    // 1. Revenue by Plan
-    const revenueByPlan = await db.collection("subscriptions").aggregate([
+    // 1. Revenue by Plan using User model
+    const revenueByPlan = await User.aggregate([
       { 
         $match: { 
           ...dateFilter,
-          status: { $in: ["active", "trialing"] }
+          isDeleted: false,
+          plan: { $in: ["premium", "enterprise"] }
         } 
       },
       {
         $group: {
           _id: "$plan",
-          revenue: { $sum: "$amount" },
           count: { $sum: 1 },
+          revenue: {
+            $sum: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$plan", "premium"] }, then: 9 },
+                  { case: { $eq: ["$plan", "enterprise"] }, then: 29 }
+                ],
+                default: 0
+              }
+            }
+          }
         },
       },
       {
@@ -57,202 +69,176 @@ export async function GET(req: NextRequest) {
         },
       },
       { $sort: { revenue: -1 } },
-    ]).toArray();
+    ]);
 
-    // 2. Revenue Growth (daily revenue and MRR)
-    const revenueGrowth = await Promise.all([
-      // Daily revenue from new subscriptions
-      db.collection("subscriptions").aggregate([
-        { $match: dateFilter },
-        {
-          $group: {
-            _id: {
-              date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-            },
-            revenue: { $sum: "$amount" },
+    // 2. Daily Revenue Trend
+    const dailyRevenue = await User.aggregate([
+      {
+        $match: {
+          ...dateFilter,
+          isDeleted: false,
+          plan: { $in: ["premium", "enterprise"] }
+        },
+      },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            plan: "$plan"
           },
-        },
-        {
-          $project: {
-            date: "$_id.date",
-            revenue: 1,
-            _id: 0,
-          },
-        },
-        { $sort: { date: 1 } },
-      ]).toArray(),
-
-      // Calculate MRR for each day (Monthly Recurring Revenue)
-      db.collection("subscriptions").aggregate([
-        { 
-          $match: { 
-            status: { $in: ["active", "trialing"] },
-            createdAt: { $lte: new Date(endDate + "T23:59:59.999Z") }
-          } 
-        },
-        {
-          $addFields: {
-            normalizedAmount: {
-              $cond: [
-                { $eq: ["$interval", "year"] },
-                { $divide: ["$amount", 12] }, // Convert yearly to monthly
-                "$amount" // Already monthly
-              ]
+          count: { $sum: 1 },
+          revenue: {
+            $sum: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$plan", "premium"] }, then: 9 },
+                  { case: { $eq: ["$plan", "enterprise"] }, then: 29 }
+                ],
+                default: 0
+              }
             }
           }
         },
-        {
-          $group: {
-            _id: null,
-            mrr: { $sum: "$normalizedAmount" },
-          },
-        },
-      ]).toArray(),
-    ]);
-
-    // Get current MRR
-    const currentMRR = revenueGrowth[1][0]?.mrr || 0;
-
-    // Merge revenue growth data
-    const growthMap = new Map();
-    
-    // Add daily revenue
-    revenueGrowth[0].forEach((item) => {
-      growthMap.set(item.date, { date: item.date, revenue: item.revenue, mrr: currentMRR });
-    });
-
-    const revenueGrowthData = Array.from(growthMap.values()).sort((a, b) => 
-      a.date.localeCompare(b.date)
-    );
-
-    // 3. Churn Analysis
-    const churnAnalysis = await Promise.all([
-      // Daily cancellations
-      db.collection("subscriptions").aggregate([
-        { 
-          $match: { 
-            status: "canceled",
-            canceledAt: {
-              $gte: new Date(startDate),
-              $lte: new Date(endDate + "T23:59:59.999Z"),
+      },
+      {
+        $group: {
+          _id: "$_id.date",
+          totalRevenue: { $sum: "$revenue" },
+          plans: {
+            $push: {
+              plan: "$_id.plan",
+              revenue: "$revenue",
+              count: "$count"
             }
-          } 
-        },
-        {
-          $group: {
-            _id: {
-              date: { $dateToString: { format: "%Y-%m-%d", date: "$canceledAt" } },
-            },
-            cancellations: { $sum: 1 },
-          },
-        },
-        {
-          $project: {
-            date: "$_id.date",
-            cancellations: 1,
-            _id: 0,
-          },
-        },
-        { $sort: { date: 1 } },
-      ]).toArray(),
-
-      // Total active subscriptions for retention calculation
-      db.collection("subscriptions").aggregate([
-        { 
-          $match: { 
-            status: { $in: ["active", "trialing"] }
-          } 
-        },
-        {
-          $count: "total"
+          }
         }
-      ]).toArray(),
+      },
+      {
+        $project: {
+          date: "$_id",
+          totalRevenue: 1,
+          plans: 1,
+          _id: 0,
+        },
+      },
+      { $sort: { date: 1 } },
     ]);
 
-    const totalActiveSubscriptions = churnAnalysis[1][0]?.total || 1;
-    
-    // Calculate churn and retention rates
-    const churnData = churnAnalysis[0].map((item) => {
-      const churnRate = (item.cancellations / totalActiveSubscriptions) * 100;
-      const retentionRate = 100 - churnRate;
-      
-      return {
-        date: item.date,
-        churn: churnRate,
-        retention: retentionRate,
-      };
-    });
+    // 3. Monthly Recurring Revenue (MRR) calculation
+    const mrrData = await User.aggregate([
+      {
+        $match: {
+          isDeleted: false,
+          isActive: true,
+          plan: { $in: ["premium", "enterprise"] }
+        }
+      },
+      {
+        $group: {
+          _id: "$plan",
+          activeSubscriptions: { $sum: 1 },
+          monthlyRevenue: {
+            $sum: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$plan", "premium"] }, then: 9 },
+                  { case: { $eq: ["$plan", "enterprise"] }, then: 29 }
+                ],
+                default: 0
+              }
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          plan: "$_id",
+          activeSubscriptions: 1,
+          monthlyRevenue: 1,
+          _id: 0
+        }
+      }
+    ]);
 
-    // 4. Revenue metrics summary
-    const revenueMetrics = await db.collection("subscriptions").aggregate([
-      { 
-        $match: { 
-          ...dateFilter,
-          status: { $in: ["active", "trialing"] }
-        } 
+    // 4. Revenue Growth Comparison
+    const periodDays = Math.ceil(
+      (new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
+    );
+    const previousStartDate = new Date(new Date(startDate).getTime() - periodDays * 24 * 60 * 60 * 1000);
+    const previousEndDate = new Date(startDate);
+
+    const previousPeriodRevenue = await User.aggregate([
+      {
+        $match: {
+          createdAt: {
+            $gte: previousStartDate,
+            $lt: previousEndDate,
+          },
+          isDeleted: false,
+          plan: { $in: ["premium", "enterprise"] }
+        }
       },
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: "$amount" },
-          totalSubscriptions: { $sum: 1 },
-          averageRevenuePerUser: { $avg: "$amount" },
-        },
-      },
-    ]).toArray();
-
-    // 5. Fill in missing dates for consistent chart data
-    type FilledDataType = {
-      [key: string]: any;
-      date?: string;
-      revenue?: number;
-      mrr?: number;
-      churn?: number;
-      retention?: number;
-    };
-
-    const fillMissingDates = (data: any[], dateField: string = 'date') => {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const filledData: FilledDataType[] = [];
-      const dataMap = new Map(data.map(item => [item[dateField], item]));
-
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split('T')[0];
-        filledData.push(dataMap.get(dateStr) || {
-          [dateField]: dateStr,
-          revenue: 0,
-          mrr: currentMRR,
-          churn: 0,
-          retention: 100,
-        });
+          totalRevenue: {
+            $sum: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$plan", "premium"] }, then: 9 },
+                  { case: { $eq: ["$plan", "enterprise"] }, then: 29 }
+                ],
+                default: 0
+              }
+            }
+          },
+          totalSubscriptions: { $sum: 1 }
+        }
       }
+    ]);
 
-      return filledData;
-    };
+    // 5. Revenue Summary
+    const currentPeriodTotal = revenueByPlan.reduce((sum, item) => sum + item.revenue, 0);
+    const previousPeriodTotal = previousPeriodRevenue[0]?.totalRevenue || 0;
+    const totalMRR = mrrData.reduce((sum, item) => sum + item.monthlyRevenue, 0);
+    const totalActiveSubscriptions = mrrData.reduce((sum, item) => sum + item.activeSubscriptions, 0);
 
-    const responseData = {
-      revenueByPlan,
-      revenueGrowth: fillMissingDates(revenueGrowthData),
-      churnAnalysis: fillMissingDates(churnData),
-      metrics: revenueMetrics[0] || {
-        totalRevenue: 0,
-        totalSubscriptions: 0,
-        averageRevenuePerUser: 0,
-      },
-      mrr: currentMRR,
-    };
+    const revenueGrowth = previousPeriodTotal > 0 
+      ? ((currentPeriodTotal - previousPeriodTotal) / previousPeriodTotal) * 100 
+      : currentPeriodTotal > 0 ? 100 : 0;
+
+    // 6. Customer Lifetime Value (CLV) estimation
+    const averageRevenuePerUser = totalActiveSubscriptions > 0 ? totalMRR / totalActiveSubscriptions : 0;
+    const estimatedCLV = averageRevenuePerUser * 12; // Simple 12-month estimate
 
     return NextResponse.json({
       success: true,
-      data: responseData,
+      data: {
+        summary: {
+          currentPeriodRevenue: currentPeriodTotal,
+          previousPeriodRevenue: previousPeriodTotal,
+          revenueGrowth: Math.round(revenueGrowth * 100) / 100,
+          monthlyRecurringRevenue: totalMRR,
+          annualRecurringRevenue: totalMRR * 12,
+          activeSubscriptions: totalActiveSubscriptions,
+          averageRevenuePerUser: Math.round(averageRevenuePerUser * 100) / 100,
+          estimatedCustomerLifetimeValue: Math.round(estimatedCLV * 100) / 100,
+        },
+        charts: {
+          revenueByPlan,
+          dailyRevenue,
+          mrrByPlan: mrrData,
+        },
+        period: {
+          startDate,
+          endDate,
+          previousStartDate: previousStartDate.toISOString(),
+          previousEndDate: previousEndDate.toISOString(),
+        },
+      },
     });
-
   } catch (error) {
     console.error("Error fetching revenue reports:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

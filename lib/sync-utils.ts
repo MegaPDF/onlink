@@ -531,10 +531,9 @@ export class DataSyncManager {
       console.log('Starting full system data sync...');
 
       // Get all active users
-      const users = await User.find({ 
-        isDeleted: false, 
-        isActive: true 
-      }).select('_id');
+     const users = await User.find({ 
+  isDeleted: { $ne: true } // or isDeleted: false
+});
 
       console.log(`Syncing data for ${users.length} users...`);
 

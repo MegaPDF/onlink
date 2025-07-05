@@ -186,6 +186,8 @@ export default function AdminDomainsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
+  const [deletingDomain, setDeletingDomain] = useState<string | null>(null);
+  const [verifyingDomain, setVerifyingDomain] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     type: ALL_TYPES,
     status: ALL_STATUSES,
@@ -1083,47 +1085,78 @@ export default function AdminDomainsPage() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-48">
                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
+
                                 <DropdownMenuItem
-                                  onClick={() => copyToClipboard(domain.domain)}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    copyToClipboard(domain.domain);
+                                  }}
                                 >
                                   <Copy className="mr-2 h-4 w-4" />
                                   Copy Domain
                                 </DropdownMenuItem>
+
                                 <DropdownMenuItem
-                                  onClick={() =>
+                                  onClick={(e) => {
+                                    e.preventDefault();
                                     window.open(
                                       `https://${domain.domain}`,
                                       "_blank"
-                                    )
-                                  }
+                                    );
+                                  }}
                                 >
                                   <ExternalLink className="mr-2 h-4 w-4" />
                                   Visit Domain
                                 </DropdownMenuItem>
-                                <DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    // Add your configure logic here
+                                    console.log(
+                                      "Configure domain:",
+                                      domain.domain
+                                    );
+                                  }}
+                                >
                                   <Settings className="mr-2 h-4 w-4" />
                                   Configure
                                 </DropdownMenuItem>
+
                                 <DropdownMenuSeparator />
+
                                 {!domain.isVerified && (
                                   <DropdownMenuItem
-                                    onClick={() =>
-                                      handleVerifyDomain(domain._id)
-                                    }
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      setVerifyingDomain(domain._id);
+                                      handleVerifyDomain(domain._id).finally(
+                                        () => {
+                                          setVerifyingDomain(null);
+                                        }
+                                      );
+                                    }}
                                     className="text-blue-600"
+                                    disabled={verifyingDomain === domain._id}
                                   >
-                                    <Shield className="mr-2 h-4 w-4" />
+                                    {verifyingDomain === domain._id ? (
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Shield className="mr-2 h-4 w-4" />
+                                    )}
                                     Verify Domain
                                   </DropdownMenuItem>
                                 )}
+
                                 {domain.isActive ? (
                                   <DropdownMenuItem
-                                    onClick={() =>
+                                    onClick={(e) => {
+                                      e.preventDefault();
                                       handleToggleDomainStatus(
                                         domain._id,
                                         false
-                                      )
-                                    }
+                                      );
+                                    }}
                                     className="text-orange-600"
                                   >
                                     <XCircle className="mr-2 h-4 w-4" />
@@ -1131,60 +1164,46 @@ export default function AdminDomainsPage() {
                                   </DropdownMenuItem>
                                 ) : (
                                   <DropdownMenuItem
-                                    onClick={() =>
-                                      handleToggleDomainStatus(domain._id, true)
-                                    }
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      handleToggleDomainStatus(
+                                        domain._id,
+                                        true
+                                      );
+                                    }}
                                     className="text-green-600"
                                   >
                                     <CheckCircle className="mr-2 h-4 w-4" />
                                     Activate
                                   </DropdownMenuItem>
                                 )}
-                                <DropdownMenuItem>
+
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    // Add your SSL settings logic here
+                                    console.log(
+                                      "SSL settings for:",
+                                      domain.domain
+                                    );
+                                  }}
+                                >
                                   <Key className="mr-2 h-4 w-4" />
                                   SSL Settings
                                 </DropdownMenuItem>
+
                                 <DropdownMenuSeparator />
-                                <AlertDialog>
-                                  <AlertDialogTrigger asChild>
-                                    <DropdownMenuItem
-                                      onSelect={(e) => e.preventDefault()}
-                                      className="text-red-600"
-                                    >
-                                      <Trash2 className="mr-2 h-4 w-4" />
-                                      Delete Domain
-                                    </DropdownMenuItem>
-                                  </AlertDialogTrigger>
-                                  <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                      <AlertDialogTitle className="flex items-center gap-2">
-                                        <AlertTriangle className="h-5 w-5 text-red-600" />
-                                        Delete Domain
-                                      </AlertDialogTitle>
-                                      <AlertDialogDescription>
-                                        Are you sure you want to delete{" "}
-                                        <strong>{domain.domain}</strong>? This
-                                        action cannot be undone and will affect
-                                        all associated links (
-                                        {formatNumber(domain.usage.linksCount)}{" "}
-                                        links).
-                                      </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                      <AlertDialogCancel>
-                                        Cancel
-                                      </AlertDialogCancel>
-                                      <AlertDialogAction
-                                        onClick={() =>
-                                          handleDeleteDomain(domain._id)
-                                        }
-                                        className="bg-red-600 hover:bg-red-700"
-                                      >
-                                        Delete Domain
-                                      </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                  </AlertDialogContent>
-                                </AlertDialog>
+
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    setDeletingDomain(domain._id);
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete Domain
+                                </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>
@@ -1193,7 +1212,53 @@ export default function AdminDomainsPage() {
                     </TableBody>
                   </Table>
                 </div>
-
+                <AlertDialog
+                  open={deletingDomain !== null}
+                  onOpenChange={(open) => !open && setDeletingDomain(null)}
+                >
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle className="flex items-center gap-2">
+                        <AlertTriangle className="h-5 w-5 text-red-600" />
+                        Delete Domain
+                      </AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Are you sure you want to delete{" "}
+                        <strong>
+                          {deletingDomain &&
+                            data?.domains.find((d) => d._id === deletingDomain)
+                              ?.domain}
+                        </strong>
+                        ? This action cannot be undone and will affect all
+                        associated links (
+                        {deletingDomain &&
+                          formatNumber(
+                            data?.domains.find((d) => d._id === deletingDomain)
+                              ?.usage.linksCount || 0
+                          )}{" "}
+                        links).
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel
+                        onClick={() => setDeletingDomain(null)}
+                      >
+                        Cancel
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => {
+                          if (deletingDomain) {
+                            handleDeleteDomain(deletingDomain);
+                            setDeletingDomain(null);
+                          }
+                        }}
+                        className="bg-red-600 hover:bg-red-700"
+                      >
+                        Delete Domain
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
                 {/* Pagination */}
                 {data && data.pagination.totalPages > 1 && (
                   <div className="flex items-center justify-between">

@@ -163,19 +163,6 @@ export const InviteMemberSchema = z.object({
   }).optional()
 });
 
-// Domain validations
-export const CreateDomainSchema = z.object({
-  domain: z.string()
-    .min(3, 'Domain must be at least 3 characters')
-    .max(255, 'Domain is too long')
-    .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/, 'Invalid domain format')
-    .refine(domain => {
-      const parts = domain.split('.');
-      return parts.every(part => part.length > 0 && part.length <= 63);
-    }, 'Invalid domain format'),
-  type: z.enum(['system', 'custom', 'subdomain']),
-  verificationMethod: z.enum(['dns', 'file', 'meta']).default('dns')
-});
 
 // Settings validations
 // ============= lib/validations.ts - Complete UpdateSettingsSchema =============
@@ -355,3 +342,4 @@ export const BatchDeleteLinksSchema = z.object({
   linkIds: z.array(z.string().refine(isValidObjectId, 'Invalid link ID format')).min(1, 'At least one link ID is required'),
   permanent: z.boolean().default(false)
 });
+

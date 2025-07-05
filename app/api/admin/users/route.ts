@@ -195,6 +195,9 @@ export async function POST(req: NextRequest) {
       emailVerificationToken: validatedData.isEmailVerified ? undefined : emailVerificationToken,
       emailVerificationExpires: validatedData.isEmailVerified ? undefined : emailVerificationExpires,
       createdBy: session.user.id,
+      subscription: {
+         status: 'active' 
+       },
       usage: {
         linksCount: 0,
         clicksCount: 0,

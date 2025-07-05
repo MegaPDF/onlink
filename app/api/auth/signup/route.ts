@@ -54,8 +54,9 @@ export async function POST(req: NextRequest) {
       role: 'user',
       isActive: true,
       isEmailVerified: false,
-      
-      // Usage tracking
+      subscription: {
+         status: 'active' 
+       },
       usage: {
         linksCount: 0,
         clicksCount: 0,
