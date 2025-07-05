@@ -312,7 +312,11 @@ export function LinksTable({
       setSelectedLinks([]);
     } else {
       // FIXED: Use _id consistently
-      setSelectedLinks(links.map((link) => link._id || link.id).filter((id): id is string => typeof id === "string"));
+      setSelectedLinks(
+        links
+          .map((link) => link._id || link.id)
+          .filter((id): id is string => typeof id === "string")
+      );
     }
   };
 
@@ -347,14 +351,6 @@ export function LinksTable({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {/* Debug Info */}
-        <div className="text-xs text-muted-foreground bg-muted p-2 rounded mb-4">
-          <strong>Debug:</strong> {links.length} links loaded, selectedFolder: "
-          {selectedFolder || "none"}", folderId prop: "{folderId || "undefined"}
-          "
-        </div>
-
-        {/* Filters */}
         <div className="flex items-center gap-4 mb-6">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -485,7 +481,7 @@ export function LinksTable({
                         <TableCell>
                           <Checkbox
                             checked={selectedLinks.includes(linkId ?? "")}
-                            onCheckedChange={() => selectLink(linkId?? "")}
+                            onCheckedChange={() => selectLink(linkId ?? "")}
                           />
                         </TableCell>
                         <TableCell>

@@ -7,6 +7,7 @@ import { Settings } from "@/models/Settings";
 import { User } from "@/models/User";
 import { UpdateSettingsSchema } from "@/lib/validations";
 import { AuditLog } from "@/models/AuditLog";
+import ClientSettings from "@/lib/settings-client";
 
 // Default settings structure that matches your Settings model
 const createDefaultSettings = (lastModifiedBy: string) => ({
@@ -156,6 +157,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
+
 export async function PUT(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -171,16 +173,16 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    console.log('Received settings data:', JSON.stringify(body, null, 2));
+    console.log('📝 Received settings update:', JSON.stringify(body, null, 2));
     
-    // Create a more lenient validation approach
+    // Validate the incoming data
     let validatedData;
     try {
       validatedData = UpdateSettingsSchema.parse(body);
+      console.log('✅ Settings validation passed');
     } catch (validationError: any) {
-      console.error('Settings validation error:', validationError);
+      console.error('❌ Settings validation error:', validationError);
       
-      // Provide detailed validation error information
       if (validationError.errors) {
         const errorDetails = validationError.errors.map((err: any) => ({
           path: err.path.join('.'),
@@ -206,7 +208,7 @@ export async function PUT(req: NextRequest) {
     let settings = await Settings.findOne();
     
     if (!settings) {
-      // Create new settings if none exist
+      console.log('🔧 Creating new settings document...');
       const defaultSettingsData = createDefaultSettings(session.user.id);
       settings = new Settings(defaultSettingsData);
     }
@@ -214,7 +216,7 @@ export async function PUT(req: NextRequest) {
     // Track changes for audit log
     const changes: { field: string; oldValue: any; newValue: any }[] = [];
     
-    // Function to safely update nested objects
+    // Enhanced function to safely update nested objects including pricing
     const safeUpdate = (target: any, source: any, prefix = '') => {
       if (!source || typeof source !== 'object') return;
       
@@ -239,6 +241,8 @@ export async function PUT(req: NextRequest) {
             newValue
           });
           
+          console.log(`🔄 Updating ${fieldPath}: ${JSON.stringify(oldValue)} → ${JSON.stringify(newValue)}`);
+          
           // Update value
           target[key] = newValue;
         }
@@ -261,18 +265,49 @@ export async function PUT(req: NextRequest) {
       safeUpdate(settings.defaultLimits, validatedData.defaultLimits, 'defaultLimits');
     }
 
+    // IMPORTANT: Handle pricing updates specifically
+    if (validatedData.pricing) {
+      console.log('💰 Updating pricing configuration...');
+      
+      if (!settings.pricing) {
+        settings.pricing = {};
+      }
+      
+      // Update each pricing tier
+      if (validatedData.pricing.free) {
+        if (!settings.pricing.free) settings.pricing.free = {};
+        safeUpdate(settings.pricing.free, validatedData.pricing.free, 'pricing.free');
+      }
+      
+      if (validatedData.pricing.premium) {
+        if (!settings.pricing.premium) settings.pricing.premium = {};
+        safeUpdate(settings.pricing.premium, validatedData.pricing.premium, 'pricing.premium');
+      }
+      
+      if (validatedData.pricing.enterprise) {
+        if (!settings.pricing.enterprise) settings.pricing.enterprise = {};
+        safeUpdate(settings.pricing.enterprise, validatedData.pricing.enterprise, 'pricing.enterprise');
+      }
+      
+      console.log('💰 Pricing updates applied successfully');
+    }
+
     // Update metadata
     settings.lastModifiedBy = session.user.id;
     
     // Save the updated settings
     try {
-      await settings.save();
-      console.log(`Settings updated successfully with ${changes.length} changes`);
-    } catch (saveError) {
-      console.error('Error saving settings:', saveError);
+      const savedSettings = await settings.save();
+      console.log(`✅ Settings saved successfully with ${changes.length} changes`);
+      
+      // Clear client-side settings cache
+      ClientSettings.clearCache();
+      
+    } catch (saveError: any) {
+      console.error('❌ Error saving settings:', saveError);
       return NextResponse.json({ 
-        error: 'Failed to save settings',
-        details: process.env.NODE_ENV === 'development' ? saveError : undefined
+        error: 'Failed to save settings to database',
+        details: process.env.NODE_ENV === 'development' ? saveError.message : undefined
       }, { status: 500 });
     }
 
@@ -288,7 +323,11 @@ export async function PUT(req: NextRequest) {
         details: {
           method: 'PUT',
           changes,
-          changesCount: changes.length
+          changesCount: changes.length,
+          hasSystemChanges: !!validatedData.system,
+          hasFeaturesChanges: !!validatedData.features,
+          hasLimitsChanges: !!validatedData.defaultLimits,
+          hasPricingChanges: !!validatedData.pricing
         },
         context: {
           ip: req.headers.get('x-forwarded-for') || '127.0.0.1',
@@ -300,15 +339,16 @@ export async function PUT(req: NextRequest) {
         },
         risk: {
           level: 'high',
-          factors: ['admin_action', 'system_settings'],
-          score: 80
+          factors: ['admin_action', 'system_settings', ...(validatedData.pricing ? ['pricing_changes'] : [])],
+          score: validatedData.pricing ? 90 : 80
         }
       });
 
       await auditLog.save();
+      console.log('📋 Audit log created successfully');
     } catch (auditError) {
-      // Log audit error but don't fail the request
-      console.error('Failed to create audit log:', auditError);
+      console.error('⚠️ Failed to create audit log:', auditError);
+      // Don't fail the request for audit log errors
     }
 
     // Remove sensitive data before returning
@@ -326,6 +366,8 @@ export async function PUT(req: NextRequest) {
       responseSettings.system.integrations.facebook.appSecret = '[HIDDEN]';
     }
 
+    console.log('🎉 Settings update completed successfully');
+
     return NextResponse.json({
       success: true,
       message: 'Settings updated successfully',
@@ -335,7 +377,7 @@ export async function PUT(req: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('Admin settings PUT error:', error);
+    console.error('❌ Admin settings PUT error:', error);
     return NextResponse.json({ 
       error: 'Internal server error',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined,

@@ -243,14 +243,14 @@ export function useBilling() {
           maxLinks: 5,
           maxClicks: 1000,
           customDomains: 0,
-          teamMembers: 1,
           analytics: false,
           qrCodes: false,
           bulkOperations: false,
           apiAccess: false,
           prioritySupport: false,
           whiteLabel: false
-        }
+        },
+        popular: false
       },
       {
         id: 'premium',
@@ -262,7 +262,6 @@ export function useBilling() {
           maxLinks: -1,
           maxClicks: -1,
           customDomains: 3,
-          teamMembers: 1,
           analytics: true,
           qrCodes: true,
           bulkOperations: true,
@@ -282,14 +281,14 @@ export function useBilling() {
           maxLinks: -1,
           maxClicks: -1,
           customDomains: -1,
-          teamMembers: -1,
           analytics: true,
           qrCodes: true,
           bulkOperations: true,
           apiAccess: true,
           prioritySupport: true,
           whiteLabel: true
-        }
+        },
+        popular: false
       }
     ];
 

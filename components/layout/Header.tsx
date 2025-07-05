@@ -30,6 +30,7 @@ import {
   Crown,
   Shield,
 } from "lucide-react";
+import { useAppSettings } from "@/hooks/use-settings";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -40,7 +41,7 @@ export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
   const { user, logout, isAuthenticated, status } = useAuth();
   const router = useRouter();
   const toast = useToast();
-
+  const settings = useAppSettings();
   // Debug logging (remove in production)
   useEffect(() => {
     console.log("Header state changed:", {
@@ -87,17 +88,17 @@ export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
   // Force re-render when authentication status changes
   const authKey = `${isAuthenticated}-${status}-${user?.id || "guest"}`;
 
-    function getInitials(name: string): React.ReactNode {
-        if (!name) return "";
-        const words = name.trim().split(" ");
-        if (words.length === 1) {
-            return words[0].charAt(0).toUpperCase();
-        }
-        return (
-            words[0].charAt(0).toUpperCase() +
-            words[words.length - 1].charAt(0).toUpperCase()
-        );
+  function getInitials(name: string): React.ReactNode {
+    if (!name) return "";
+    const words = name.trim().split(" ");
+    if (words.length === 1) {
+      return words[0].charAt(0).toUpperCase();
     }
+    return (
+      words[0].charAt(0).toUpperCase() +
+      words[words.length - 1].charAt(0).toUpperCase()
+    );
+  }
   return (
     <header
       key={authKey}
@@ -123,7 +124,9 @@ export function Header({ onMenuClick, showMobileMenu = true }: HeaderProps) {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <LinkIcon className="h-4 w-4" />
             </div>
-            <span className="hidden font-bold sm:inline-block">ShortLink</span>
+            <span className="hidden font-bold sm:inline-block">
+              {settings.appName}
+            </span>
           </Link>
 
           {/* Navigation (Desktop) */}

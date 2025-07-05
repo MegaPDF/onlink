@@ -8,6 +8,8 @@ interface AnalyticsData {
   geography: Array<{ country: string; count: number }>;
   devices: Array<{ type: string; count: number }>;
   referrers: Array<{ domain: string; count: number }>;
+  browsers?: Array<{ browser: string; count: number }>;
+  operatingSystems?: Array<{ os: string; count: number }>;
 }
 
 interface AnalyticsFilters {
@@ -45,8 +47,9 @@ export function useAnalytics({
     try {
       const params = new URLSearchParams();
       
-      if (shortCode) {
-        params.append('shortCode', shortCode);
+      // FIXED: Add URL parameter correctly
+      if (shortCode && shortCode !== 'all') {
+        params.append('url', shortCode);
       }
       
       // Ensure dates are properly formatted
@@ -56,6 +59,8 @@ export function useAnalytics({
       params.append('startDate', startDate.toISOString());
       params.append('endDate', endDate.toISOString());
 
+      console.log('🔍 Fetching analytics with params:', params.toString());
+
       const response = await fetch(`/api/client/analytics?${params.toString()}`);
       
       if (!response.ok) {
@@ -64,22 +69,56 @@ export function useAnalytics({
       }
 
       const result = await response.json();
-      const analyticsData = result.data.analytics || result.data;
+      console.log('📊 Analytics API response:', result);
       
-      // Ensure all required arrays exist with default values
-      const normalizedData = {
+      let analyticsData;
+      
+      // FIXED: Handle different response structures
+      if (result.success) {
+        if (shortCode && shortCode !== 'all') {
+          // For specific URL analytics
+          analyticsData = result.data;
+        } else {
+          // For aggregate analytics (all URLs)
+          if (result.data.summary) {
+            // Transform summary data to match expected structure
+            analyticsData = {
+              totalClicks: result.data.summary.totalClicks || 0,
+              uniqueClicks: 0, // Summary doesn't have unique clicks
+              dailyStats: [],
+              geography: [],
+              devices: [],
+              referrers: [],
+              browsers: [],
+              operatingSystems: []
+            };
+          } else {
+            analyticsData = result.data;
+          }
+        }
+      } else {
+        throw new Error(result.error || 'Invalid response format');
+      }
+      
+      // FIXED: Ensure all required arrays exist with default values
+      const normalizedData: AnalyticsData = {
         totalClicks: analyticsData?.totalClicks || 0,
         uniqueClicks: analyticsData?.uniqueClicks || 0,
         dailyStats: Array.isArray(analyticsData?.dailyStats) ? analyticsData.dailyStats : [],
         geography: Array.isArray(analyticsData?.geography) ? analyticsData.geography : [],
         devices: Array.isArray(analyticsData?.devices) ? analyticsData.devices : [],
-        referrers: Array.isArray(analyticsData?.referrers) ? analyticsData.referrers : []
+        referrers: Array.isArray(analyticsData?.referrers) ? analyticsData.referrers : [],
+        browsers: Array.isArray(analyticsData?.browsers) ? analyticsData.browsers : [],
+        operatingSystems: Array.isArray(analyticsData?.operatingSystems) ? analyticsData.operatingSystems : []
       };
       
+      console.log('✅ Normalized analytics data:', normalizedData);
       setData(normalizedData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error occurred');
-      console.error('Analytics fetch error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(errorMessage);
+      console.error('❌ Analytics fetch error:', err);
+      
       // Set empty data structure on error to prevent undefined access
       setData({
         totalClicks: 0,
@@ -87,7 +126,9 @@ export function useAnalytics({
         dailyStats: [],
         geography: [],
         devices: [],
-        referrers: []
+        referrers: [],
+        browsers: [],
+        operatingSystems: []
       });
     } finally {
       setIsLoading(false);
@@ -106,7 +147,7 @@ export function useAnalytics({
         endDate: endDate.toISOString()
       });
 
-      if (shortCode) {
+      if (shortCode && shortCode !== 'all') {
         params.append('shortCode', shortCode);
       }
 
@@ -120,7 +161,7 @@ export function useAnalytics({
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `analytics-${Date.now()}.${format}`;
+      a.download = `analytics-${shortCode || 'all'}-${Date.now()}.${format}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -246,17 +287,19 @@ export function useAnalytics({
     };
   }, [autoRefresh, refreshInterval, fetchAnalytics]);
 
-  // Initial load
+  // FIXED: Re-fetch when shortCode changes
   useEffect(() => {
+    console.log('🔄 Analytics hook: shortCode changed to:', shortCode);
     fetchAnalytics();
-  }, []);
+  }, [shortCode]); // Re-fetch when shortCode changes
 
   // Refetch when filters change
   useEffect(() => {
     if (filters) {
+      console.log('🔄 Analytics hook: filters changed:', filters);
       fetchAnalytics();
     }
-  }, [filters]);
+  }, [filters.dateRange.start, filters.dateRange.end]); // Only re-fetch when date range actually changes
 
   return {
     // Data

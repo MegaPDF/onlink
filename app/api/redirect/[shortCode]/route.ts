@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
 import { URL as URLModel } from '@/models/URL';
 import { AnalyticsTracker } from '@/lib/analytics';
+import { getLocationFromIP } from '@/lib/geolocation';
 
 export async function GET(
   req: NextRequest,
@@ -101,33 +102,36 @@ export async function GET(
     const trackingSkipped = req.nextUrl.searchParams.get('_t') === 'skip';
     
     if (!trackingSkipped) {
-      console.log('📊 Processing analytics tracking...');
+  console.log('📊 Processing analytics tracking...');
+  
+  // Track analytics with geolocation (non-blocking)
+  setImmediate(async () => {
+    try {
+      // Get location data
+      const locationData = await getLocationFromIP(clientIP);
       
-      // Track analytics in background (non-blocking)
-      setImmediate(async () => {
-        try {
-          const analyticsResult = await AnalyticsTracker.recordClick({
-            shortCode,
-            ip: clientIP,
-            userAgent: userAgent,
-            referrer: referrer || undefined,
-            device: deviceInfo,
-            country: undefined, // TODO: Add IP geolocation
-            city: undefined     // TODO: Add IP geolocation
-          });
-          
-          if (analyticsResult) {
-            console.log('✅ Analytics recorded successfully');
-          } else {
-            console.log('⏭️ Analytics skipped (likely reload or duplicate)');
-          }
-        } catch (analyticsError) {
-          console.error('❌ Analytics tracking error:', analyticsError);
-        }
+      const analyticsResult = await AnalyticsTracker.recordClick({
+        shortCode,
+        ip: clientIP,
+        userAgent: userAgent,
+        referrer: referrer || undefined,
+        country: locationData.country,
+        city: locationData.city,
+        device: deviceInfo
       });
-    } else {
-      console.log('⏭️ Analytics tracking skipped via parameter');
+      
+      if (analyticsResult) {
+        console.log('✅ Analytics recorded successfully with location:', locationData.country);
+      } else {
+        console.log('⏭️ Analytics skipped (likely reload or duplicate)');
+      }
+    } catch (analyticsError) {
+      console.error('❌ Analytics tracking error:', analyticsError);
     }
+  });
+} else {
+  console.log('⏭️ Analytics tracking skipped via parameter');
+}
 
     // Build final destination URL with UTM parameters
     let destinationUrl = url.originalUrl;

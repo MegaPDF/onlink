@@ -43,6 +43,7 @@
     "@tabler/icons-react": "^3.34.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/nodemailer": "^6.4.17",
+    "@types/stripe": "^8.0.416",
     "bcryptjs": "^3.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

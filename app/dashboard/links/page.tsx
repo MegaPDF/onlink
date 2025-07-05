@@ -239,16 +239,7 @@ export default function LinksPage() {
             </Card>
           )}
 
-          {/* Debug info */}
-          <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
-            <strong>Debug:</strong> selectedFolderId = "
-            {selectedFolderId || "null"}", linksTableFolderId = "
-            {getLinksTableFolderId() || "undefined"}", folders ={" "}
-            {folders.length}, currentFolder ={" "}
-            {getCurrentFolder()?.name || "none"}
-          </div>
-
-          {/* FIXED: Pass selectedFolderId to LinksTable and force refresh */}
+         
           <LinksTable
             key={linksKey} // Force refresh when links are created
             folderId={getLinksTableFolderId()}

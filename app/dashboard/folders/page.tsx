@@ -262,15 +262,7 @@ export default function FoldersPage() {
             </Card>
           )}
 
-          {/* Debug info */}
-          <div className="text-xs text-muted-foreground bg-muted p-2 rounded mb-4">
-            <strong>Debug:</strong> selectedFolderId = "
-            {selectedFolderId || "null"}", linksTableFolderId = "
-            {getLinksTableFolderId() || "undefined"}", showFolderFilter ={" "}
-            {selectedFolderId === null ? "true" : "false"}
-          </div>
-
-          {/* Content Area - FIXED: Always render LinksTable with proper filtering */}
+         
           {selectedFolderId === null ? (
             /* Show welcome/getting started when no folder is selected */
             <div className="space-y-6">

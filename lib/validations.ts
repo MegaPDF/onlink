@@ -177,6 +177,7 @@ const PricingPlanSchema = z.object({
   popular: z.boolean().optional(),
   badge: z.string().max(50).optional()
 });
+
 export const UpdateSettingsSchema = z.object({
   system: z.object({
     appName: z.string().min(1).max(100).optional(),
@@ -196,8 +197,8 @@ export const UpdateSettingsSchema = z.object({
     
     security: z.object({
       enforceSSL: z.boolean().optional(),
-      maxLoginAttempts: z.number().min(1).max(10).optional(),
-      lockoutDuration: z.number().min(1).max(60).optional(),
+      maxLoginAttempts: z.number().min(1).max(20).optional(),
+      lockoutDuration: z.number().min(1).max(1440).optional(),
       sessionTimeout: z.number().min(1).max(168).optional(),
       passwordMinLength: z.number().min(4).max(128).optional(),
       requireEmailVerification: z.boolean().optional(),
@@ -208,7 +209,7 @@ export const UpdateSettingsSchema = z.object({
       provider: z.string().optional(),
       trackingCode: z.string().optional(),
       enableCustomAnalytics: z.boolean().optional(),
-      retentionDays: z.number().min(1).max(365).optional()
+      retentionDays: z.number().min(1).max(2555).optional()
     }).optional(),
     
     integrations: z.object({
@@ -230,7 +231,7 @@ export const UpdateSettingsSchema = z.object({
       }).optional()
     }).optional()
   }).optional(),
-
+  
   features: z.object({
     enableSignup: z.boolean().optional(),
     enableTeams: z.boolean().optional(),
@@ -241,41 +242,34 @@ export const UpdateSettingsSchema = z.object({
     enableWhiteLabel: z.boolean().optional(),
     maintenanceMode: z.boolean().optional()
   }).optional(),
-
+  
   defaultLimits: z.object({
     free: z.object({
-      linksPerMonth: z.number().optional(),
-      clicksPerMonth: z.number().optional(),
-      customDomains: z.number().min(0).optional(),
-      analytics: z.boolean().optional()
+      linksPerMonth: z.number().min(-1),
+      clicksPerMonth: z.number().min(-1),
+      customDomains: z.number().min(0),
+      analytics: z.boolean()
     }).optional(),
     premium: z.object({
-      linksPerMonth: z.number().optional(),
-      clicksPerMonth: z.number().optional(),
-      customDomains: z.number().optional(),
-      analytics: z.boolean().optional()
+      linksPerMonth: z.number().min(-1),
+      clicksPerMonth: z.number().min(-1),
+      customDomains: z.number().min(0),
+      analytics: z.boolean()
     }).optional(),
     enterprise: z.object({
-      linksPerMonth: z.number().optional(),
-      clicksPerMonth: z.number().optional(),
-      customDomains: z.number().optional(),
-      analytics: z.boolean().optional()
+      linksPerMonth: z.number().min(-1),
+      clicksPerMonth: z.number().min(-1),
+      customDomains: z.number().min(-1),
+      analytics: z.boolean()
     }).optional()
   }).optional(),
 
-  // Add the pricing validation here
+  // ADD PRICING VALIDATION HERE
   pricing: z.object({
     free: PricingPlanSchema.optional(),
     premium: PricingPlanSchema.optional(),
     enterprise: PricingPlanSchema.optional()
-  }).optional(),
-
-  // Meta fields
-  lastModifiedBy: z.string().optional(),
-  _id: z.string().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-  __v: z.number().optional()
+  }).optional()
 });
 
 // User profile validations

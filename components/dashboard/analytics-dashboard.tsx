@@ -45,8 +45,11 @@ import {
   Crown,
   RefreshCw,
   AlertCircle,
+  BarChart3,
+  Activity,
 } from "lucide-react";
 import { formatNumber } from "@/lib/utils";
+import { toast } from "sonner";
 
 const COLORS = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"];
 
@@ -59,13 +62,22 @@ interface UserUrl {
   shortCode: string;
   title?: string;
   originalUrl: string;
+  clicks: {
+    total: number;
+    unique: number;
+  };
 }
 
 export function AnalyticsDashboard({
-  shortCode,
+  shortCode: initialShortCode,
   showUrlSelector = true,
 }: AnalyticsDashboardProps) {
   const { user } = useAuth();
+  const [selectedUrl, setSelectedUrl] = useState(initialShortCode || "all");
+  const [userUrls, setUserUrls] = useState<UserUrl[]>([]);
+  const [urlsLoading, setUrlsLoading] = useState(false);
+
+  // FIXED: Use selectedUrl for analytics hook, not the initial prop
   const {
     data,
     metrics,
@@ -74,17 +86,23 @@ export function AnalyticsDashboard({
     setDateRange,
     exportAnalytics,
     refresh,
-  } = useAnalytics({ shortCode });
+  } = useAnalytics({
+    shortCode: selectedUrl === "all" ? undefined : selectedUrl,
+  });
 
-  const [selectedUrl, setSelectedUrl] = useState(shortCode || "all");
-  const [userUrls, setUserUrls] = useState<UserUrl[]>([]);
-  const [urlsLoading, setUrlsLoading] = useState(false);
-
+  // Update selected URL when initial shortCode changes
   useEffect(() => {
-    if (showUrlSelector && !shortCode) {
+    if (initialShortCode) {
+      setSelectedUrl(initialShortCode);
+    }
+  }, [initialShortCode]);
+
+  // Fetch user URLs for the selector
+  useEffect(() => {
+    if (showUrlSelector && !initialShortCode) {
       fetchUserUrls();
     }
-  }, [showUrlSelector, shortCode]);
+  }, [showUrlSelector, initialShortCode]);
 
   const fetchUserUrls = async () => {
     try {
@@ -99,22 +117,24 @@ export function AnalyticsDashboard({
       }
     } catch (error) {
       console.error("Failed to fetch URLs:", error);
+      toast.error("Failed to load URLs");
     } finally {
       setUrlsLoading(false);
     }
   };
 
   const handleUrlChange = (value: string) => {
+    console.log("🔄 URL selection changed to:", value);
     setSelectedUrl(value);
-    // You might want to trigger a re-fetch with the new URL here
-    // The useAnalytics hook should handle this based on shortCode prop changes
   };
 
   const handleExport = async () => {
     try {
       await exportAnalytics("csv");
+      toast.success("Analytics exported successfully");
     } catch (error) {
       console.error("Export failed:", error);
+      toast.error("Failed to export analytics");
     }
   };
 
@@ -171,7 +191,7 @@ export function AnalyticsDashboard({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {showUrlSelector && (
             <Select
               value={selectedUrl}
@@ -187,7 +207,14 @@ export function AnalyticsDashboard({
                 <SelectItem value="all">All URLs</SelectItem>
                 {userUrls.map((url) => (
                   <SelectItem key={url.shortCode} value={url.shortCode}>
-                    {url.title || url.shortCode}
+                    <div className="flex flex-col">
+                      <span className="font-medium">
+                        {url.title || url.shortCode}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {url.clicks.total} clicks
+                      </span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -196,7 +223,7 @@ export function AnalyticsDashboard({
 
           <Select onValueChange={(value) => setDateRange(value)}>
             <SelectTrigger className="w-32">
-              <SelectValue placeholder="7 days" />
+              <SelectValue placeholder="30 days" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="today">Today</SelectItem>
@@ -209,7 +236,7 @@ export function AnalyticsDashboard({
           <Button
             variant="outline"
             onClick={handleExport}
-            disabled={isLoading || !data}
+            disabled={isLoading || !data || data.totalClicks === 0}
           >
             <Download className="mr-2 h-4 w-4" />
             Export
@@ -225,7 +252,7 @@ export function AnalyticsDashboard({
       </div>
 
       {/* Loading State for Metrics */}
-      {isLoading && !metrics ? (
+      {isLoading && !data ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[...Array(4)].map((_, i) => (
             <Card key={i} className="animate-pulse">
@@ -243,79 +270,118 @@ export function AnalyticsDashboard({
       ) : (
         <>
           {/* Metrics Cards */}
-          {metrics && (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    Total Clicks
-                  </CardTitle>
-                  <MousePointer className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(metrics.totalClicks)}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Total Clicks
+                </CardTitle>
+                <MousePointer className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {formatNumber(data?.totalClicks || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {metrics?.growth && metrics.growth !== 0 ? (
+                    <span
+                      className={
+                        metrics.growth > 0 ? "text-green-600" : "text-red-600"
+                      }
+                    >
+                      {metrics.growth > 0 ? "+" : ""}
+                      {metrics.growth.toFixed(1)}% from last period
+                    </span>
+                  ) : (
+                    "No previous period data"
+                  )}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Unique Visitors
+                </CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {formatNumber(data?.uniqueClicks || 0)}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {data?.totalClicks && data.uniqueClicks
+                    ? `${Math.round(
+                        (data.uniqueClicks / data.totalClicks) * 100
+                      )}% unique rate`
+                    : "No unique data"}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Top Country
+                </CardTitle>
+                <Globe className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {metrics?.topCountry || "N/A"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Most visitors from
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Top Device
+                </CardTitle>
+                <Smartphone className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {metrics?.topDevice || "N/A"}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Primary device type
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Show message when no data */}
+          {data && data.totalClicks === 0 ? (
+            <Card>
+              <CardContent className="p-8">
+                <div className="text-center space-y-4">
+                  <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto" />
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">
+                      No Analytics Data
+                    </h3>
+                    <p className="text-muted-foreground">
+                      {selectedUrl === "all"
+                        ? "No clicks recorded for your links yet. Share your links to start seeing analytics data."
+                        : "No clicks recorded for this link yet. Share this link to start seeing analytics data."}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {metrics.growth > 0 ? "+" : ""}
-                    {metrics.growth.toFixed(1)}% from last period
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    Unique Visitors
-                  </CardTitle>
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {formatNumber(metrics.uniqueClicks)}
+                  <div className="flex justify-center gap-2">
+                    <Button variant="outline" onClick={refresh}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Refresh Data
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {metrics.clickRate.toFixed(1)} clicks per visitor
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    Top Country
-                  </CardTitle>
-                  <Globe className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{metrics.topCountry}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Most active region
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    Top Device
-                  </CardTitle>
-                  <Smartphone className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold capitalize">
-                    {metrics.topDevice}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Primary device type
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          {/* Charts */}
-          {data && (
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            /* Charts Tabs */
             <Tabs defaultValue="overview" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -327,42 +393,30 @@ export function AnalyticsDashboard({
               <TabsContent value="overview" className="space-y-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Clicks Over Time</CardTitle>
+                    <CardTitle>Click Trends</CardTitle>
                     <CardDescription>
-                      Daily click trends for the selected period
+                      Daily click activity over time
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {data.dailyStats && data.dailyStats.length > 0 ? (
+                    {data?.dailyStats && data.dailyStats.length > 0 ? (
                       <ResponsiveContainer width="100%" height={300}>
                         <LineChart data={data.dailyStats}>
                           <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis
-                            dataKey="date"
-                            tickFormatter={(value) =>
-                              new Date(value).toLocaleDateString()
-                            }
-                          />
+                          <XAxis dataKey="date" />
                           <YAxis />
-                          <Tooltip
-                            labelFormatter={(value) =>
-                              new Date(value).toLocaleDateString()
-                            }
-                            formatter={(value) => [value, "Clicks"]}
-                          />
+                          <Tooltip />
                           <Line
                             type="monotone"
                             dataKey="clicks"
                             stroke="#3B82F6"
                             strokeWidth={2}
-                            dot={{ r: 4 }}
-                            activeDot={{ r: 6 }}
                           />
                         </LineChart>
                       </ResponsiveContainer>
                     ) : (
-                      <div className="flex items-center justify-center h-[300px] text-muted-foreground">
-                        No data available for the selected period
+                      <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                        No daily data available
                       </div>
                     )}
                   </CardContent>
@@ -370,105 +424,69 @@ export function AnalyticsDashboard({
               </TabsContent>
 
               <TabsContent value="geography" className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Top Countries</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {data.geography && data.geography.length > 0 ? (
-                        <ResponsiveContainer width="100%" height={250}>
-                          <PieChart>
-                            <Pie
-                              data={data.geography.slice(0, 5)}
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={80}
-                              fill="#8884d8"
-                              dataKey="count"
-                              nameKey="country"
-                            >
-                              {data.geography
-                                .slice(0, 5)
-                                .map((entry, index) => (
-                                  <Cell
-                                    key={`cell-${index}`}
-                                    fill={COLORS[index % COLORS.length]}
-                                  />
-                                ))}
-                            </Pie>
-                            <Tooltip formatter={(value) => [value, "Clicks"]} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                          No geography data available
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Country Breakdown</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {data.geography && data.geography.length > 0 ? (
-                        <div className="space-y-2">
-                          {data.geography.slice(0, 10).map((country, index) => (
-                            <div
-                              key={country.country}
-                              className="flex items-center justify-between"
-                            >
-                              <div className="flex items-center gap-2">
-                                <div
-                                  className="w-3 h-3 rounded-full"
-                                  style={{
-                                    backgroundColor:
-                                      COLORS[index % COLORS.length],
-                                  }}
-                                />
-                                <span className="text-sm">
-                                  {country.country}
-                                </span>
-                              </div>
-                              <span className="text-sm font-medium">
-                                {formatNumber(country.count)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 text-muted-foreground">
-                          No country data available
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Geography</CardTitle>
+                    <CardDescription>
+                      Where your visitors are coming from
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {data?.geography && data.geography.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={data.geography.slice(0, 10)}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="country" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar dataKey="count" fill="#3B82F6" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                        No geography data available
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </TabsContent>
 
               <TabsContent value="devices" className="space-y-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Device Types</CardTitle>
+                    <CardTitle>Devices</CardTitle>
                     <CardDescription>
-                      Click distribution by device type
+                      Device types used by your visitors
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {data.devices && data.devices.length > 0 ? (
+                    {data?.devices && data.devices.length > 0 ? (
                       <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={data.devices}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="type" />
-                          <YAxis />
-                          <Tooltip formatter={(value) => [value, "Clicks"]} />
-                          <Bar dataKey="count" fill="#3B82F6" />
-                        </BarChart>
+                        <PieChart>
+                          <Pie
+                            data={data.devices}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={120}
+                            fill="#8884d8"
+                            dataKey="count"
+                            label={({ type, percent }) =>
+                              `${type} (${((percent ?? 0) * 100).toFixed(0)}%)`
+                            }
+                          >
+                            {data.devices.map((entry, index) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={COLORS[index % COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
                       </ResponsiveContainer>
                     ) : (
-                      <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                      <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                         No device data available
                       </div>
                     )}
@@ -479,33 +497,24 @@ export function AnalyticsDashboard({
               <TabsContent value="referrers" className="space-y-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Top Referrers</CardTitle>
+                    <CardTitle>Referrers</CardTitle>
                     <CardDescription>
-                      Sources of traffic to your links
+                      Traffic sources and referrers
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {data.referrers && data.referrers.length > 0 ? (
-                      <div className="space-y-3">
-                        {data.referrers.slice(0, 10).map((referrer, index) => (
-                          <div
-                            key={referrer.domain}
-                            className="flex items-center justify-between p-3 bg-muted rounded-lg"
-                          >
-                            <div className="flex items-center gap-3">
-                              <Badge variant="outline">{index + 1}</Badge>
-                              <span className="font-medium">
-                                {referrer.domain}
-                              </span>
-                            </div>
-                            <span className="text-sm text-muted-foreground">
-                              {formatNumber(referrer.count)} clicks
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                    {data?.referrers && data.referrers.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={data.referrers.slice(0, 10)}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="domain" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar dataKey="count" fill="#10B981" />
+                        </BarChart>
+                      </ResponsiveContainer>
                     ) : (
-                      <div className="text-center py-8 text-muted-foreground">
+                      <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                         No referrer data available
                       </div>
                     )}
@@ -515,22 +524,6 @@ export function AnalyticsDashboard({
             </Tabs>
           )}
         </>
-      )}
-
-      {/* No Data State */}
-      {!isLoading && !data && !error && (
-        <Card>
-          <CardContent className="p-6">
-            <div className="text-center space-y-4">
-              <BarChart className="h-12 w-12 text-muted-foreground mx-auto" />
-              <h3 className="text-lg font-semibold">No Analytics Data</h3>
-              <p className="text-muted-foreground">
-                No analytics data available for the selected period. Try
-                selecting a different date range or check back later.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
       )}
     </div>
   );

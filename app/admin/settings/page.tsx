@@ -52,6 +52,8 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
+import ClientSettings from "@/lib/settings-client";
+import { EmailTestComponent } from "@/components/admin/test-email";
 
 interface AdminSettings {
   system: {
@@ -399,7 +401,8 @@ export default function AdminSettingsPage() {
         },
         body: JSON.stringify(settings),
       });
-
+      ClientSettings.clearCache();
+      await ClientSettings.loadSettings();
       const result = await response.json();
 
       if (!response.ok) {
@@ -713,6 +716,7 @@ export default function AdminSettingsPage() {
                 <Label>Use SSL/TLS</Label>
               </div>
             </CardContent>
+            <EmailTestComponent />
           </Card>
         </TabsContent>
 

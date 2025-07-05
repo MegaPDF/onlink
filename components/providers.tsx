@@ -1,54 +1,56 @@
-// ============= Enhanced components/providers.tsx =============
+// components/providers.tsx - Updated with settings initialization
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import { SessionProvider } from "next-auth/react";
-import { ThemeProvider } from "next-themes";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { Toaster } from "sonner";
+import ClientSettings from "@/lib/settings-client";
+import { Toaster } from "./ui/sonner";
 
-interface ProvidersProps {
-  children: React.ReactNode;
+export function Providers({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    // Initialize settings on client load
+    ClientSettings.loadSettings().catch(console.error);
+  }, []);
+
+  return (
+    <SessionProvider>
+      {children}
+      <Toaster />
+    </SessionProvider>
+  );
 }
 
-export function Providers({ children }: ProvidersProps) {
-  return (
-    <SessionProvider
-      // Re-fetch session every 2 minutes for faster logout detection
-      refetchInterval={2 * 60}
-      // Re-fetch session when window is focused
-      refetchOnWindowFocus={true}
-      // Enable base URL for proper session handling
-      basePath="/api/auth"
-    >
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="system"
-        enableSystem
-        disableTransitionOnChange
-      >
-        <TooltipProvider delayDuration={300}>
-          {children}
+// Alternative: If you want to show a loading state while settings load
+export function ProvidersWithLoading({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [settingsLoaded, setSettingsLoaded] = React.useState(false);
 
-          {/* Sonner toast notifications */}
-          <Toaster
-            position="bottom-right"
-            expand={true}
-            richColors
-            closeButton
-            toastOptions={{
-              style: {
-                background: "hsl(var(--background))",
-                border: "1px solid hsl(var(--border))",
-                color: "hsl(var(--foreground))",
-              },
-              className:
-                "group toast group-[.toaster]:bg-background group-[.toaster]:text-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg",
-              descriptionClassName: "group-[.toast]:text-muted-foreground",
-            }}
-          />
-        </TooltipProvider>
-      </ThemeProvider>
+  useEffect(() => {
+    ClientSettings.loadSettings()
+      .then(() => setSettingsLoaded(true))
+      .catch((error) => {
+        console.error("Failed to load settings:", error);
+        setSettingsLoaded(true); // Still show app with fallback settings
+      });
+  }, []);
+
+  // Show loading while settings are being fetched
+  // You can customize this loading screen
+  if (!settingsLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <SessionProvider>
+      {children}
+      <Toaster />
     </SessionProvider>
   );
 }

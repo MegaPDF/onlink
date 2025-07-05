@@ -148,13 +148,7 @@ export function UrlShortener({
 
   return (
     <div className="space-y-6">
-      {/* Debug Info */}
-      <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
-        <strong>Debug:</strong> defaultFolderId = "{defaultFolderId}", folders
-        count = {folders.length}
-      </div>
-
-      {/* Show success result */}
+    
       {shortenedUrl && (
         <Card className="border-green-200 bg-green-50">
           <CardHeader>

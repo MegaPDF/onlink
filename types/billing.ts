@@ -61,16 +61,15 @@ export interface Subscription {
 }
 
 export interface PlanFeatures {
-  maxLinks: number; // -1 for unlimited
-  maxClicks: number; // -1 for unlimited
-  customDomains: number;
-  teamMembers: number;
-  analytics: boolean;
-  qrCodes: boolean;
-  bulkOperations: boolean;
-  apiAccess: boolean;
-  prioritySupport: boolean;
-  whiteLabel: boolean;
+  maxLinks: number;
+    maxClicks: number;
+    customDomains: number;
+    analytics: boolean;
+    qrCodes: boolean;
+    bulkOperations: boolean;
+    apiAccess: boolean;
+    prioritySupport: boolean;
+    whiteLabel: boolean;
 }
 
 export interface PricingPlan {
@@ -86,7 +85,7 @@ export interface PricingPlan {
     yearly: string;
   };
   features: PlanFeatures;
-  popular?: boolean;
+  popular: boolean;
   badge?: string;
 }
 
