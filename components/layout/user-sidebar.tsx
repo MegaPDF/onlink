@@ -187,8 +187,12 @@ export function UserSidebar({ className, onNavigate }: UserSidebarProps) {
       <div className="space-y-4 py-4">
         {/* Header */}
         <div className="px-3 py-2">
-          <h2 className="text-lg font-semibold tracking-tight">Dashboard</h2>
-
+          <Link href="/dashboard" className="flex items-center space-x-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <LinkIcon className="h-4 w-4" />
+            </div>
+            <span className="hidden font-bold sm:inline-block">ShortLink</span>
+          </Link>
           {/* User Info */}
           <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg mt-4">
             <div className="h-8 w-8 bg-primary rounded-full flex items-center justify-center text-white text-sm font-medium">

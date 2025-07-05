@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -127,6 +128,11 @@ export function LinksTable({
   const [selectedLinks, setSelectedLinks] = useState<string[]>([]);
   const [bulkActionOpen, setBulkActionOpen] = useState(false);
 
+  // Update selectedFolder when folderId prop changes
+  useEffect(() => {
+    setSelectedFolder(folderId || "");
+  }, [folderId]);
+
   const fetchLinks = async () => {
     try {
       const params = new URLSearchParams({
@@ -136,22 +142,24 @@ export function LinksTable({
         sortOrder,
         ...(search && { search }),
         ...(statusFilter !== "all" && { status: statusFilter }),
-        ...(tagFilter && { tag: tagFilter }),
-        ...(selectedFolder && { folderId: selectedFolder }),
+        ...(tagFilter !== "all" && tagFilter && { tag: tagFilter }),
+        ...(selectedFolder && selectedFolder !== "all" && { folderId: selectedFolder }),
       });
 
       const response = await fetch(`/api/client/my-links?${params}`);
       const result = await response.json();
 
       if (response.ok) {
-        setLinks(result.data.urls);
-        setTotalPages(result.data.pagination.totalPages);
+        setLinks(result.data.urls || []);
+        setTotalPages(result.data.pagination?.totalPages || 1);
         setTags(result.data.tags || []);
       } else {
         toast.error("Failed to fetch links");
+        setLinks([]);
       }
     } catch (error) {
       toast.error("Error loading links");
+      setLinks([]);
     } finally {
       setLoading(false);
     }
@@ -190,32 +198,35 @@ export function LinksTable({
     toast.success("Copied to clipboard!");
   };
 
-  const toggleLinkStatus = async (linkId: string, currentStatus: boolean) => {
-    try {
-      const response = await fetch("/api/client/my-links", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          urlId: linkId,
-          updates: { isActive: !currentStatus },
-        }),
-      });
-
-      if (response.ok) {
-        toast.success(`Link ${!currentStatus ? "activated" : "deactivated"}`);
-        fetchLinks();
-      } else {
-        toast.error("Failed to update link");
-      }
-    } catch (error) {
-      toast.error("Error updating link");
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortOrder("desc");
     }
   };
 
-  const deleteLink = async (linkId: string) => {
+  const selectAllLinks = () => {
+    if (selectedLinks.length === links.length) {
+      setSelectedLinks([]);
+    } else {
+      setSelectedLinks(links.map(link => link.id));
+    }
+  };
+
+  const selectLink = (linkId: string) => {
+    if (selectedLinks.includes(linkId)) {
+      setSelectedLinks(selectedLinks.filter(id => id !== linkId));
+    } else {
+      setSelectedLinks([...selectedLinks, linkId]);
+    }
+  };
+
+  const handleDelete = async (linkId: string) => {
     try {
-      const response = await fetch(`/api/client/my-links?urlId=${linkId}`, {
-        method: "DELETE",
+      const response = await fetch(`/api/client/links/${linkId}`, {
+        method: 'DELETE',
       });
 
       if (response.ok) {
@@ -229,142 +240,36 @@ export function LinksTable({
     }
   };
 
-  const handleBulkAction = async (action: string) => {
-    if (selectedLinks.length === 0) {
-      toast.error("No links selected");
-      return;
-    }
-
+  const handleToggleStatus = async (linkId: string, isActive: boolean) => {
     try {
-      let response;
-
-      switch (action) {
-        case "activate":
-          response = await fetch("/api/client/my-links/bulk", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              urlIds: selectedLinks,
-              updates: { isActive: true },
-            }),
-          });
-          break;
-        case "deactivate":
-          response = await fetch("/api/client/my-links/bulk", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              urlIds: selectedLinks,
-              updates: { isActive: false },
-            }),
-          });
-          break;
-        case "delete":
-          if (
-            !confirm(
-              `Are you sure you want to delete ${selectedLinks.length} links?`
-            )
-          ) {
-            return;
-          }
-          response = await fetch("/api/client/my-links/bulk", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ urlIds: selectedLinks }),
-          });
-          break;
-        default:
-          return;
-      }
-
-      if (response?.ok) {
-        toast.success(`Bulk ${action} completed successfully`);
-        setSelectedLinks([]);
-        fetchLinks();
-      } else {
-        toast.error(`Failed to ${action} links`);
-      }
-    } catch (error) {
-      toast.error("Error performing bulk action");
-    }
-  };
-
-  const exportLinks = async () => {
-    try {
-      const params = new URLSearchParams({
-        ...(search && { search }),
-        ...(statusFilter !== "all" && { status: statusFilter }),
-        ...(tagFilter && { tag: tagFilter }),
-        ...(selectedFolder && { folderId: selectedFolder }),
-        export: "true",
+      const response = await fetch(`/api/client/links/${linkId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ isActive: !isActive }),
       });
 
-      const response = await fetch(`/api/client/my-links/export?${params}`);
-
       if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `links-export-${
-          new Date().toISOString().split("T")[0]
-        }.csv`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        toast.success("Links exported successfully");
+        toast.success(`Link ${!isActive ? 'activated' : 'deactivated'} successfully`);
+        fetchLinks();
       } else {
-        toast.error("Failed to export links");
+        toast.error("Failed to update link status");
       }
     } catch (error) {
-      toast.error("Error exporting links");
+      toast.error("Error updating link status");
     }
-  };
-
-  const getStatusBadge = (link: Link) => {
-    if (!link.isActive) {
-      return <Badge variant="secondary">Inactive</Badge>;
-    }
-    if (link.expiresAt && new Date(link.expiresAt) < new Date()) {
-      return <Badge variant="destructive">Expired</Badge>;
-    }
-    return <Badge className="bg-green-500 hover:bg-green-600">Active</Badge>;
-  };
-
-  const handleSort = (column: string) => {
-    if (sortBy === column) {
-      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
-    } else {
-      setSortBy(column);
-      setSortOrder("desc");
-    }
-    setPage(1);
-  };
-
-  const selectAllLinks = () => {
-    if (selectedLinks.length === links.length) {
-      setSelectedLinks([]);
-    } else {
-      setSelectedLinks(links.map((link) => link.id));
-    }
-  };
-
-  const selectLink = (linkId: string) => {
-    setSelectedLinks((prev) =>
-      prev.includes(linkId)
-        ? prev.filter((id) => id !== linkId)
-        : [...prev, linkId]
-    );
   };
 
   if (loading) {
     return (
       <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center justify-center">
-            <LoadingSpinner size="lg" />
-          </div>
+        <CardHeader>
+          <CardTitle>Links</CardTitle>
+          <CardDescription>Loading your links...</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LoadingSpinner />
         </CardContent>
       </Card>
     );
@@ -373,87 +278,51 @@ export function LinksTable({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>My Links</CardTitle>
-            <CardDescription>
-              Manage and monitor your shortened URLs
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={exportLinks}>
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-            {selectedLinks.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    Actions ({selectedLinks.length})
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={() => handleBulkAction("activate")}
-                  >
-                    <Play className="h-4 w-4 mr-2" />
-                    Activate
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => handleBulkAction("deactivate")}
-                  >
-                    <Pause className="h-4 w-4 mr-2" />
-                    Deactivate
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    className="text-destructive"
-                    onClick={() => handleBulkAction("delete")}
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        </div>
+        <CardTitle>Links</CardTitle>
+        <CardDescription>
+          Manage and monitor your shortened links
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        <div className="flex items-center gap-4 mb-6">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search links..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
+              className="pl-9"
             />
           </div>
 
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-32">
-              <SelectValue />
+              <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="inactive">Inactive</SelectItem>
-              <SelectItem value="expired">Expired</SelectItem>
             </SelectContent>
           </Select>
 
           {showFolderFilter && (
-            <Select value={selectedFolder} onValueChange={setSelectedFolder}>
+            <Select 
+              value={selectedFolder === "" ? "all" : selectedFolder} 
+              onValueChange={(value) => setSelectedFolder(value === "all" ? "" : value)}
+            >
               <SelectTrigger className="w-40">
                 <SelectValue placeholder="All Folders" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Folders</SelectItem>
                 <SelectItem value="null">Uncategorized</SelectItem>
-                {folders.map((folder) => (
-                  <SelectItem key={folder._id} value={folder._id}>
+                {folders.map((folder, folderIndex) => (
+                  <SelectItem 
+                    key={`folder-select-${folder._id}-${folderIndex}`} 
+                    value={folder._id}
+                  >
                     <div className="flex items-center gap-2">
                       <div
                         className="w-3 h-3 rounded-full"
@@ -468,14 +337,20 @@ export function LinksTable({
           )}
 
           {tags.length > 0 && (
-            <Select value={tagFilter} onValueChange={setTagFilter}>
+            <Select 
+              value={tagFilter === "" ? "all" : tagFilter} 
+              onValueChange={(value) => setTagFilter(value === "all" ? "" : value)}
+            >
               <SelectTrigger className="w-32">
                 <SelectValue placeholder="All Tags" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Tags</SelectItem>
-                {tags.map((tag) => (
-                  <SelectItem key={tag} value={tag}>
+                {tags.map((tag, tagIndex) => (
+                  <SelectItem 
+                    key={`tag-select-${tagIndex}-${tag}`} 
+                    value={tag}
+                  >
                     <div className="flex items-center gap-2">
                       <Tag className="w-3 h-3" />
                       {tag}
@@ -486,6 +361,31 @@ export function LinksTable({
             </Select>
           )}
         </div>
+
+        {/* Bulk Actions */}
+        {selectedLinks.length > 0 && (
+          <div className="mb-4 p-4 bg-muted rounded-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">
+                {selectedLinks.length} link{selectedLinks.length !== 1 ? 's' : ''} selected
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm">
+                  <Folder className="w-4 h-4 mr-2" />
+                  Move to Folder
+                </Button>
+                <Button variant="outline" size="sm">
+                  <Pause className="w-4 h-4 mr-2" />
+                  Deactivate
+                </Button>
+                <Button variant="destructive" size="sm">
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Links Table */}
         {links.length === 0 ? (
@@ -542,8 +442,8 @@ export function LinksTable({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {links.map((link) => (
-                    <TableRow key={link.id}>
+                  {links.map((link, linkIndex) => (
+                    <TableRow key={`link-row-${link.id}-${linkIndex}`}>
                       <TableCell>
                         <input
                           type="checkbox"
@@ -554,38 +454,30 @@ export function LinksTable({
                       </TableCell>
                       <TableCell>
                         <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <ExternalLink className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium truncate max-w-[300px]">
-                              {link.title || link.originalUrl}
-                            </span>
+                          <div className="font-medium text-sm">
+                            {link.title || new URL(link.originalUrl).hostname}
                           </div>
-                          {link.folder && (
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <div
-                                className="w-2 h-2 rounded-full"
-                                style={{
-                                  backgroundColor:
-                                    link.folder.color || "#3B82F6",
-                                }}
-                              />
-                              {link.folder.name}
-                            </div>
-                          )}
+                          <div className="text-xs text-muted-foreground truncate max-w-[300px]">
+                            {link.originalUrl}
+                          </div>
                           {link.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {link.tags.slice(0, 3).map((tag) => (
-                                <Badge
-                                  key={tag}
-                                  variant="outline"
+                            <div className="flex gap-1 flex-wrap">
+                              {link.tags.slice(0, 2).map((tag, tagIndex) => (
+                                <Badge 
+                                  key={`link-${link.id}-tag-${tagIndex}-${tag}`} 
+                                  variant="secondary" 
                                   className="text-xs"
                                 >
                                   {tag}
                                 </Badge>
                               ))}
-                              {link.tags.length > 3 && (
-                                <Badge variant="outline" className="text-xs">
-                                  +{link.tags.length - 3}
+                              {link.tags.length > 2 && (
+                                <Badge 
+                                  key={`link-${link.id}-more-tags`}
+                                  variant="secondary" 
+                                  className="text-xs"
+                                >
+                                  +{link.tags.length - 2}
                                 </Badge>
                               )}
                             </div>
@@ -595,69 +487,72 @@ export function LinksTable({
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <code className="text-sm bg-muted px-2 py-1 rounded">
-                            {link.shortCode}
+                            {link.shortUrl}
                           </code>
                           <Button
                             variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
+                            size="sm"
                             onClick={() => copyToClipboard(link.shortUrl)}
                           >
-                            <Copy className="h-3 w-3" />
+                            <Copy className="w-3 h-3" />
                           </Button>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <MousePointer className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium">
-                            {formatNumber(link.clicks.total)}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            ({formatNumber(link.clicks.unique)} unique)
-                          </span>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <MousePointer className="w-3 h-3 text-muted-foreground" />
+                            <span className="font-medium">{formatNumber(link.clicks.total)}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatNumber(link.clicks.unique)} unique
+                          </div>
                         </div>
                       </TableCell>
-                      <TableCell>{getStatusBadge(link)}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {formatDistanceToNow(new Date(link.createdAt), {
-                            addSuffix: true,
-                          })}
+                      <TableCell>
+                        <div className="space-y-1">
+                          <Badge variant={link.isActive ? "default" : "secondary"}>
+                            {link.isActive ? "Active" : "Inactive"}
+                          </Badge>
+                          {link.expiresAt && (
+                            <div className="text-xs text-muted-foreground">
+                              Expires {formatDistanceToNow(new Date(link.expiresAt), { addSuffix: true })}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(link.createdAt), { addSuffix: true })}
                         </div>
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
+                            <Button variant="ghost" size="sm">
+                              <MoreHorizontal className="w-4 h-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => copyToClipboard(link.shortUrl)}
-                            >
+                            <DropdownMenuItem onClick={() => copyToClipboard(link.shortUrl)}>
                               <Copy className="w-4 h-4 mr-2" />
                               Copy Link
                             </DropdownMenuItem>
                             <DropdownMenuItem>
-                              <QrCode className="w-4 h-4 mr-2" />
-                              QR Code
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
                               <BarChart3 className="w-4 h-4 mr-2" />
                               Analytics
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <QrCode className="w-4 h-4 mr-2" />
+                              QR Code
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem>
                               <Edit className="w-4 h-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                toggleLinkStatus(link.id, link.isActive)
-                              }
+                            <DropdownMenuItem 
+                              onClick={() => handleToggleStatus(link.id, link.isActive)}
                             >
                               {link.isActive ? (
                                 <>
@@ -674,8 +569,8 @@ export function LinksTable({
                             <DropdownMenuSeparator />
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
-                                <DropdownMenuItem
-                                  className="text-destructive"
+                                <DropdownMenuItem 
+                                  className="text-destructive focus:text-destructive"
                                   onSelect={(e) => e.preventDefault()}
                                 >
                                   <Trash2 className="w-4 h-4 mr-2" />
@@ -684,21 +579,18 @@ export function LinksTable({
                               </AlertDialogTrigger>
                               <AlertDialogContent>
                                 <AlertDialogHeader>
-                                  <AlertDialogTitle>
-                                    Delete Link
-                                  </AlertDialogTitle>
+                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                                   <AlertDialogDescription>
-                                    Are you sure you want to delete this link?
-                                    This action cannot be undone.
+                                    This action cannot be undone. This will permanently delete your link.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    onClick={() => deleteLink(link.id)}
+                                  <AlertDialogAction 
+                                    onClick={() => handleDelete(link.id)}
                                     className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                                   >
-                                    Delete Link
+                                    Delete
                                   </AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
@@ -718,24 +610,24 @@ export function LinksTable({
                 <div className="text-sm text-muted-foreground">
                   Page {page} of {totalPages}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex gap-2">
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setPage(page - 1)}
+                    onClick={() => setPage(Math.max(1, page - 1))}
                     disabled={page === 1}
                   >
-                    <ChevronLeft className="h-4 w-4" />
+                    <ChevronLeft className="w-4 h-4 mr-2" />
                     Previous
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setPage(page + 1)}
+                    onClick={() => setPage(Math.min(totalPages, page + 1))}
                     disabled={page === totalPages}
                   >
                     Next
-                    <ChevronRight className="h-4 w-4" />
+                    <ChevronRight className="w-4 h-4 ml-2" />
                   </Button>
                 </div>
               </div>

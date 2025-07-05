@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -5,8 +6,6 @@ import { useRouter, usePathname } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -36,26 +35,16 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
-  Folder,
   FolderPlus,
   MoreHorizontal,
+  ChevronRight,
+  ChevronDown,
   Edit,
   Trash2,
-  ChevronDown,
-  ChevronRight,
-  Globe,
-  Hash,
-  Eye,
-  EyeOff,
-  Move,
-  Archive,
+  FolderOpen,
+  Folder,
+  Link as LinkIcon,
 } from "lucide-react";
-import { formatNumber } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 interface FolderData {
@@ -112,7 +101,7 @@ export function FoldersSidebar({
         const foldersData = result.data.folders;
         setFlatFolders(foldersData);
         setUncategorizedCount(result.data.uncategorizedCount || 0);
-        
+
         // Build hierarchical structure
         const hierarchical = buildHierarchy(foldersData);
         setFolders(hierarchical);
@@ -131,27 +120,23 @@ export function FoldersSidebar({
     const rootFolders: FolderData[] = [];
 
     // Create map and initialize children arrays
-    folders.forEach(folder => {
+    folders.forEach((folder) => {
       folderMap.set(folder._id, { ...folder, children: [], isExpanded: false });
     });
 
     // Build hierarchy
-    folders.forEach(folder => {
+    folders.forEach((folder) => {
       const folderNode = folderMap.get(folder._id)!;
-      
-      if (folder.parentId) {
-        const parent = folderMap.get(folder.parentId);
-        if (parent) {
-          parent.children!.push(folderNode);
-        } else {
-          rootFolders.push(folderNode);
-        }
+
+      if (folder.parentId && folderMap.has(folder.parentId)) {
+        const parentNode = folderMap.get(folder.parentId)!;
+        parentNode.children!.push(folderNode);
       } else {
         rootFolders.push(folderNode);
       }
     });
 
-    return rootFolders.sort((a, b) => a.name.localeCompare(b.name));
+    return rootFolders;
   };
 
   useEffect(() => {
@@ -159,21 +144,13 @@ export function FoldersSidebar({
   }, []);
 
   const handleCreateFolder = async () => {
-    if (!createForm.name.trim()) {
-      toast.error("Folder name is required");
-      return;
-    }
-
     try {
       const response = await fetch("/api/client/folders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: createForm.name.trim(),
-          description: createForm.description.trim(),
-          color: createForm.color,
-          parentId: createForm.parentId || null,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(createForm),
       });
 
       const result = await response.json();
@@ -196,25 +173,25 @@ export function FoldersSidebar({
     }
   };
 
-  const handleUpdateFolder = async () => {
+  const handleEditFolder = async () => {
     if (!selectedFolder || !selectedFolder.name.trim()) {
       toast.error("Folder name is required");
       return;
     }
 
     try {
-      const response = await fetch("/api/client/folders", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          folderId: selectedFolder._id,
-          updates: {
+      const response = await fetch(
+        `/api/client/folders/${selectedFolder._id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             name: selectedFolder.name.trim(),
             description: selectedFolder.description?.trim(),
             color: selectedFolder.color,
-          },
-        }),
-      });
+          }),
+        }
+      );
 
       const result = await response.json();
 
@@ -233,7 +210,7 @@ export function FoldersSidebar({
 
   const handleDeleteFolder = async (folderId: string) => {
     try {
-      const response = await fetch(`/api/client/folders?folderId=${folderId}`, {
+      const response = await fetch(`/api/client/folders/${folderId}`, {
         method: "DELETE",
       });
 
@@ -242,8 +219,7 @@ export function FoldersSidebar({
       if (response.ok) {
         toast.success("Folder deleted successfully");
         fetchFolders();
-        
-        // Reset selection if deleted folder was selected
+        // If the deleted folder was selected, clear selection
         if (selectedFolderId === folderId) {
           onFolderSelect?.(null);
         }
@@ -256,21 +232,15 @@ export function FoldersSidebar({
   };
 
   const handleFolderClick = (folderId: string | null) => {
+    // Use the callback prop instead of navigation
     if (onFolderSelect) {
       onFolderSelect(folderId);
-    } else {
-      // Default navigation behavior
-      if (folderId) {
-        router.push(`/dashboard/folders/${folderId}`);
-      } else {
-        router.push("/dashboard/links");
-      }
     }
   };
 
   const toggleFolderExpansion = (folderId: string) => {
     const updateExpansion = (folders: FolderData[]): FolderData[] => {
-      return folders.map(folder => {
+      return folders.map((folder) => {
         if (folder._id === folderId) {
           return { ...folder, isExpanded: !folder.isExpanded };
         }
@@ -302,6 +272,7 @@ export function FoldersSidebar({
               : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
           }`}
           style={{ paddingLeft: `${8 + level * 16}px` }}
+          onClick={() => handleFolderClick(folder._id)}
         >
           {hasChildren && (
             <button
@@ -318,91 +289,88 @@ export function FoldersSidebar({
               )}
             </button>
           )}
-          
+
           {!hasChildren && <div className="w-4" />}
-          
+
           <div
-            className="flex items-center gap-2 flex-1 min-w-0"
-            onClick={() => handleFolderClick(folder._id)}
-          >
-            <div
-              className="w-3 h-3 rounded-full flex-shrink-0"
-              style={{ backgroundColor: folder.color }}
-            />
-            <span className="truncate text-sm font-medium">{folder.name}</span>
-            <div className="flex items-center gap-1 ml-auto">
-              <Badge variant="secondary" className="text-xs">
-                {formatNumber(folder.stats.urlCount)}
-              </Badge>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MoreHorizontal className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" side="right">
-                  <DropdownMenuItem onClick={() => openEditDialog(folder)}>
-                    <Edit className="w-4 h-4 mr-2" />
-                    Edit Folder
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setCreateForm({ 
-                        ...createForm, 
-                        parentId: folder._id 
-                      });
-                      setCreateDialogOpen(true);
-                    }}
-                  >
-                    <FolderPlus className="w-4 h-4 mr-2" />
-                    Add Subfolder
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onSelect={(e) => e.preventDefault()}
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Delete Folder
-                      </DropdownMenuItem>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete Folder</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to delete "{folder.name}"? 
-                          All links in this folder will be moved to uncategorized.
-                          This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={() => handleDeleteFolder(folder._id)}
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        >
-                          Delete Folder
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </DropdownMenuContent>
-              </DropdownMenu>
+            className="w-3 h-3 rounded-sm flex-shrink-0"
+            style={{ backgroundColor: folder.color }}
+          />
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium truncate">
+                {folder.name}
+              </span>
+              {folder.stats.urlCount > 0 && (
+                <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
+                  {folder.stats.urlCount}
+                </Badge>
+              )}
             </div>
           </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreHorizontal className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="right">
+              <DropdownMenuItem onClick={() => openEditDialog(folder)}>
+                <Edit className="w-4 h-4 mr-2" />
+                Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <FolderPlus className="w-4 h-4 mr-2" />
+                Add Subfolder
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Are you absolutely sure?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete the "{folder.name}" folder.
+                      All links in this folder will be moved to uncategorized.
+                      This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => handleDeleteFolder(folder._id)}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Delete Folder
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Render children */}
         {hasChildren && folder.isExpanded && (
           <div className="mt-1">
-            {folder.children!.map(child => renderFolder(child, level + 1))}
+            {folder.children!.map((child) => renderFolder(child, level + 1))}
           </div>
         )}
       </div>
@@ -440,73 +408,36 @@ export function FoldersSidebar({
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Folder Name</Label>
-                  <Input
-                    id="name"
-                    placeholder="My Folder"
-                    value={createForm.name}
+                <Input
+                  placeholder="Folder name"
+                  value={createForm.name}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, name: e.target.value })
+                  }
+                />
+                <Input
+                  placeholder="Description (optional)"
+                  value={createForm.description}
+                  onChange={(e) =>
+                    setCreateForm({
+                      ...createForm,
+                      description: e.target.value,
+                    })
+                  }
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={createForm.color}
                     onChange={(e) =>
-                      setCreateForm({ ...createForm, name: e.target.value })
+                      setCreateForm({ ...createForm, color: e.target.value })
                     }
+                    className="w-8 h-8 border rounded"
                   />
+                  <span className="text-sm text-muted-foreground">
+                    Folder color
+                  </span>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description (Optional)</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Brief description of this folder"
-                    value={createForm.description}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, description: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="color">Color</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="color"
-                      type="color"
-                      value={createForm.color}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, color: e.target.value })
-                      }
-                      className="w-12 h-8 p-1 border rounded"
-                    />
-                    <Input
-                      value={createForm.color}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, color: e.target.value })
-                      }
-                      placeholder="#3B82F6"
-                      className="flex-1"
-                    />
-                  </div>
-                </div>
-                {flatFolders.length > 0 && (
-                  <div className="space-y-2">
-                    <Label htmlFor="parentId">Parent Folder (Optional)</Label>
-                    <select
-                      id="parentId"
-                      value={createForm.parentId}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, parentId: e.target.value })
-                      }
-                      className="w-full p-2 border rounded-md"
-                    >
-                      <option value="">None (Root Level)</option>
-                      {flatFolders
-                        .filter(f => f.level < 4) // Prevent deep nesting
-                        .map(folder => (
-                          <option key={folder._id} value={folder._id}>
-                            {"  ".repeat(folder.level)}
-                            {folder.name}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                )}
               </div>
               <DialogFooter>
                 <Button
@@ -515,7 +446,10 @@ export function FoldersSidebar({
                 >
                   Cancel
                 </Button>
-                <Button onClick={handleCreateFolder} disabled={!createForm.name.trim()}>
+                <Button
+                  onClick={handleCreateFolder}
+                  disabled={!createForm.name}
+                >
                   Create Folder
                 </Button>
               </DialogFooter>
@@ -532,7 +466,7 @@ export function FoldersSidebar({
           }`}
           onClick={() => handleFolderClick(null)}
         >
-          <Globe className="w-4 h-4" />
+          <LinkIcon className="h-4 w-4" />
           <span className="text-sm font-medium">All Links</span>
         </div>
 
@@ -546,120 +480,79 @@ export function FoldersSidebar({
             }`}
             onClick={() => handleFolderClick("uncategorized")}
           >
-            <Hash className="w-4 h-4" />
+            <Folder className="h-4 w-4" />
             <span className="text-sm font-medium">Uncategorized</span>
-            <Badge variant="secondary" className="text-xs ml-auto">
-              {formatNumber(uncategorizedCount)}
+            <Badge variant="secondary" className="text-xs px-1.5 py-0.5">
+              {uncategorizedCount}
             </Badge>
           </div>
         )}
       </div>
 
       {/* Folders List */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-auto p-2">
         {folders.length === 0 ? (
-          <div className="text-center text-muted-foreground py-8">
-            <Folder className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No folders yet</p>
-            <p className="text-xs">Create your first folder to organize links</p>
+          <div className="p-4 text-center text-muted-foreground">
+            <Folder className="h-8 w-8 mx-auto mb-2 opacity-50" />
+            <p className="text-xs">No folders yet</p>
+            <p className="text-xs">Click + to create one</p>
           </div>
         ) : (
           <div className="space-y-1">
-            {folders.map(folder => renderFolder(folder))}
+            {folders.map((folder) => renderFolder(folder))}
           </div>
         )}
       </div>
 
-      {/* Edit Folder Dialog */}
+      {/* Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Folder</DialogTitle>
-            <DialogDescription>
-              Update folder details and organization.
-            </DialogDescription>
+            <DialogDescription>Update your folder details.</DialogDescription>
           </DialogHeader>
           {selectedFolder && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-name">Folder Name</Label>
-                <Input
-                  id="edit-name"
-                  value={selectedFolder.name}
+              <Input
+                placeholder="Folder name"
+                value={selectedFolder.name}
+                onChange={(e) =>
+                  setSelectedFolder({ ...selectedFolder, name: e.target.value })
+                }
+              />
+              <Input
+                placeholder="Description (optional)"
+                value={selectedFolder.description || ""}
+                onChange={(e) =>
+                  setSelectedFolder({
+                    ...selectedFolder,
+                    description: e.target.value,
+                  })
+                }
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={selectedFolder.color}
                   onChange={(e) =>
-                    setSelectedFolder({ ...selectedFolder, name: e.target.value })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-description">Description</Label>
-                <Textarea
-                  id="edit-description"
-                  value={selectedFolder.description || ""}
-                  onChange={(e) =>
-                    setSelectedFolder({ 
-                      ...selectedFolder, 
-                      description: e.target.value 
+                    setSelectedFolder({
+                      ...selectedFolder,
+                      color: e.target.value,
                     })
                   }
+                  className="w-8 h-8 border rounded"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-color">Color</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="edit-color"
-                    type="color"
-                    value={selectedFolder.color}
-                    onChange={(e) =>
-                      setSelectedFolder({ 
-                        ...selectedFolder, 
-                        color: e.target.value 
-                      })
-                    }
-                    className="w-12 h-8 p-1 border rounded"
-                  />
-                  <Input
-                    value={selectedFolder.color}
-                    onChange={(e) =>
-                      setSelectedFolder({ 
-                        ...selectedFolder, 
-                        color: e.target.value 
-                      })
-                    }
-                    className="flex-1"
-                  />
-                </div>
-              </div>
-              <div className="p-3 bg-muted/50 rounded-lg">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Links:</span>
-                  <span className="font-medium">
-                    {formatNumber(selectedFolder.stats.urlCount)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Total Clicks:</span>
-                  <span className="font-medium">
-                    {formatNumber(selectedFolder.stats.totalClicks)}
-                  </span>
-                </div>
+                <span className="text-sm text-muted-foreground">
+                  Folder color
+                </span>
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setEditDialogOpen(false)}
-            >
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleUpdateFolder}
-              disabled={!selectedFolder?.name.trim()}
-            >
-              Save Changes
-            </Button>
+            <Button onClick={handleEditFolder}>Update Folder</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

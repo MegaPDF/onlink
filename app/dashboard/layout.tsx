@@ -11,6 +11,7 @@ export default function DashboardLayoutWrapper({
     <div className="flex h-screen">
       <UserSidebar className="hidden md:block" />
       <div className="flex-1 flex flex-col overflow-hidden">
+        <UserHeader />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-background">
           {children}
         </main>

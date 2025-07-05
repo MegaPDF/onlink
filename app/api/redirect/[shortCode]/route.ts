@@ -1,7 +1,7 @@
-// ============= app/api/redirect/[shortCode]/route.ts =============
+
 import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/lib/mongodb';
-import { URL } from '@/models/URL';
+import { URL as URLModel } from '@/models/URL';
 import { AnalyticsTracker } from '@/lib/analytics';
 
 export async function GET(
@@ -17,8 +17,10 @@ export async function GET(
       return NextResponse.redirect(new URL('/', req.url), 302);
     }
 
-    // Find URL
-    const url = await URL.findOne({
+    console.log('🔍 Looking for shortCode:', shortCode);
+
+    // Find URL using the renamed model
+    const url = await URLModel.findOne({
       $or: [
         { shortCode },
         { customSlug: shortCode }
@@ -27,9 +29,11 @@ export async function GET(
     });
 
     if (!url) {
-      // Redirect to 404 page or homepage
+      console.log('❌ URL not found for shortCode:', shortCode);
       return NextResponse.redirect(new URL('/404', req.url), 302);
     }
+
+    console.log('✅ URL found:', url.originalUrl);
 
     // Check if URL is active
     if (!url.isActive) {
@@ -48,7 +52,7 @@ export async function GET(
 
     // Get user agent and check device restrictions
     const userAgent = req.headers.get('user-agent') || '';
-    const deviceInfo = parseUserAgent(userAgent);
+    const deviceInfo = AnalyticsTracker.parseUserAgent(userAgent);
 
     if (url.deviceRestrictions) {
       const restrictions = url.deviceRestrictions;
@@ -61,16 +65,10 @@ export async function GET(
       }
     }
 
-    // Check geographic restrictions (if implemented)
-    if (url.geoRestrictions && url.geoRestrictions.countries.length > 0) {
-      // This would require IP geolocation lookup
-      // For now, we'll skip this check
-    }
-
     // Check time restrictions
     if (url.timeRestrictions?.enabled) {
       const now = new Date();
-      const currentDay = now.getDay(); // 0 = Sunday, 6 = Saturday
+      const currentDay = now.getDay();
       const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
       
       const isAllowed = url.timeRestrictions.schedule.some(schedule => {
@@ -88,7 +86,6 @@ export async function GET(
     if (url.isPasswordProtected) {
       const password = req.nextUrl.searchParams.get('pwd');
       if (!password || password !== url.password) {
-        // Redirect to password page
         return NextResponse.redirect(
           new URL(`/protected/${shortCode}`, req.url), 
           302
@@ -96,32 +93,45 @@ export async function GET(
       }
     }
 
-    // Check for QR code click
-    const isQRClick = req.nextUrl.searchParams.get('qr') === '1';
-    const qrSource = req.nextUrl.searchParams.get('qr_source') as 'image' | 'pdf' | 'print' | undefined;
-
-    // Track analytics in background (non-blocking)
-    setImmediate(async () => {
-      try {
-        await AnalyticsTracker.recordClick({
-          shortCode,
-          ip: req.headers.get('x-forwarded-for') || '',
-          userAgent: req.headers.get('user-agent') || '',
-          referrer: req.headers.get('referer') || '',
-          device: deviceInfo,
-          // Optionally add country, city if available
-          // Optionally add isQRClick, qrSource as custom fields if your analytics model supports them
-        });
-      } catch (analyticsError) {
-        console.error('Analytics tracking error:', analyticsError);
-        // Don't fail the redirect for analytics errors
-      }
-    });
+    // Get client information for tracking
+    const clientIP = getClientIP(req);
+    const referrer = req.headers.get('referer');
+    
+    // Check if this is a tracking request (not a reload)
+    const trackingSkipped = req.nextUrl.searchParams.get('_t') === 'skip';
+    
+    if (!trackingSkipped) {
+      console.log('📊 Processing analytics tracking...');
+      
+      // Track analytics in background (non-blocking)
+      setImmediate(async () => {
+        try {
+          const analyticsResult = await AnalyticsTracker.recordClick({
+            shortCode,
+            ip: clientIP,
+            userAgent: userAgent,
+            referrer: referrer || undefined,
+            device: deviceInfo,
+            country: undefined, // TODO: Add IP geolocation
+            city: undefined     // TODO: Add IP geolocation
+          });
+          
+          if (analyticsResult) {
+            console.log('✅ Analytics recorded successfully');
+          } else {
+            console.log('⏭️ Analytics skipped (likely reload or duplicate)');
+          }
+        } catch (analyticsError) {
+          console.error('❌ Analytics tracking error:', analyticsError);
+        }
+      });
+    } else {
+      console.log('⏭️ Analytics tracking skipped via parameter');
+    }
 
     // Build final destination URL with UTM parameters
     let destinationUrl = url.originalUrl;
 
-    // Add UTM parameters if configured
     if (url.utmParameters) {
       const urlObj = new URL(destinationUrl);
       const utmParams = url.utmParameters;
@@ -135,26 +145,20 @@ export async function GET(
       destinationUrl = urlObj.toString();
     }
 
-    // Update last click timestamp
-    setImmediate(async () => {
-      try {
-        await URL.findByIdAndUpdate(url._id, {
-          lastClickAt: new Date()
-        });
-      } catch (updateError) {
-        console.error('Error updating last click timestamp:', updateError);
-      }
-    });
+    console.log('🚀 Redirecting to:', destinationUrl);
 
-    // Perform redirect
-    const redirectType = url.domain === process.env.NEXT_PUBLIC_BASE_URL ? 301 : 302;
+    // Create response with cache headers to prevent unnecessary reloads
+    const response = NextResponse.redirect(destinationUrl, 302);
     
-    return NextResponse.redirect(destinationUrl, redirectType);
+    // Add headers to prevent caching of the redirect
+    response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+    
+    return response;
 
   } catch (error) {
-    console.error('Redirect error:', error);
-    
-    // Fallback redirect to homepage on error
+    console.error('❌ Redirect error:', error);
     return NextResponse.redirect(new URL('/', req.url), 302);
   }
 }
@@ -170,7 +174,7 @@ export async function POST(
     const { shortCode } = params;
     const { password } = await req.json();
 
-    const url = await URL.findOne({
+    const url = await URLModel.findOne({
       $or: [
         { shortCode },
         { customSlug: shortCode }
@@ -191,7 +195,6 @@ export async function POST(
       return NextResponse.json({ error: 'Invalid password' }, { status: 401 });
     }
 
-    // Return the destination URL for client-side redirect
     return NextResponse.json({
       success: true,
       redirectUrl: `/${shortCode}?pwd=${password}`
@@ -202,20 +205,29 @@ export async function POST(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-function parseUserAgent(userAgent: string) {
-    // Basic user agent parsing for device type
-    const ua = userAgent.toLowerCase();
 
-    let deviceType: 'mobile' | 'tablet' | 'desktop' = 'desktop';
-
-    if (/mobile|iphone|ipod|android.*mobile|windows phone|blackberry|opera mini|opera mobi/.test(ua)) {
-        deviceType = 'mobile';
-    } else if (/ipad|android(?!.*mobile)|tablet|kindle|silk/.test(ua)) {
-        deviceType = 'tablet';
-    }
-
-    return {
-        deviceType,
-        raw: userAgent
-    };
+/**
+ * Get client IP address from various headers
+ */
+function getClientIP(req: NextRequest): string {
+  // Check various headers for the real IP
+  const forwardedFor = req.headers.get('x-forwarded-for');
+  const realIP = req.headers.get('x-real-ip');
+  const cfConnectingIP = req.headers.get('cf-connecting-ip'); // Cloudflare
+  
+  if (forwardedFor) {
+    // X-Forwarded-For can contain multiple IPs, get the first one
+    return forwardedFor.split(',')[0].trim();
+  }
+  
+  if (cfConnectingIP) {
+    return cfConnectingIP;
+  }
+  
+  if (realIP) {
+    return realIP;
+  }
+  
+  // Fallback for localhost development
+  return '127.0.0.1';
 }

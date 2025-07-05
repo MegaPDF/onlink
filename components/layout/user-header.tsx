@@ -52,13 +52,7 @@ export function UserHeader({
             </Button>
           )}
 
-          {/* Logo */}
-          <Link href="/dashboard" className="flex items-center space-x-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <LinkIcon className="h-4 w-4" />
-            </div>
-            <span className="hidden font-bold sm:inline-block">ShortLink</span>
-          </Link>
+         
         </div>
 
         {/* Right section */}
