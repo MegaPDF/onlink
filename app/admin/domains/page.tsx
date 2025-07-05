@@ -45,7 +45,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -435,6 +434,64 @@ export default function AdminDomainsPage() {
     } catch (error) {
       console.error("Error exporting domains:", error);
       toast.error("Failed to export domains");
+    }
+  };
+
+  // Configure domain
+  const handleConfigureDomain = async (domainId: string) => {
+    try {
+      const response = await fetch(
+        `/api/admin/domains/configure?domainId=${domainId}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to configure domain");
+      }
+
+      toast.success("Domain configuration updated successfully");
+      fetchDomains(currentPage);
+    } catch (error) {
+      console.error("Error configuring domain:", error);
+      toast.error("Failed to configure domain");
+    }
+  };
+
+  // SSL settings
+  const handleSSLSettings = async (domainId: string) => {
+    try {
+      const response = await fetch(
+        `/api/admin/domains/ssl?domainId=${domainId}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "renew_ssl",
+            provider: "letsencrypt",
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to update SSL settings");
+      }
+
+      toast.success("SSL certificate renewal initiated");
+      fetchDomains(currentPage);
+    } catch (error) {
+      console.error("Error updating SSL settings:", error);
+      toast.error("Failed to update SSL settings");
     }
   };
 
@@ -1087,18 +1144,14 @@ export default function AdminDomainsPage() {
                                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
 
                                 <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    copyToClipboard(domain.domain);
-                                  }}
+                                  onClick={() => copyToClipboard(domain.domain)}
                                 >
                                   <Copy className="mr-2 h-4 w-4" />
                                   Copy Domain
                                 </DropdownMenuItem>
 
                                 <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.preventDefault();
+                                  onClick={() => {
                                     window.open(
                                       `https://${domain.domain}`,
                                       "_blank"
@@ -1110,14 +1163,9 @@ export default function AdminDomainsPage() {
                                 </DropdownMenuItem>
 
                                 <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    // Add your configure logic here
-                                    console.log(
-                                      "Configure domain:",
-                                      domain.domain
-                                    );
-                                  }}
+                                  onClick={() =>
+                                    handleConfigureDomain(domain._id)
+                                  }
                                 >
                                   <Settings className="mr-2 h-4 w-4" />
                                   Configure
@@ -1127,8 +1175,7 @@ export default function AdminDomainsPage() {
 
                                 {!domain.isVerified && (
                                   <DropdownMenuItem
-                                    onClick={(e) => {
-                                      e.preventDefault();
+                                    onClick={() => {
                                       setVerifyingDomain(domain._id);
                                       handleVerifyDomain(domain._id).finally(
                                         () => {
@@ -1150,13 +1197,12 @@ export default function AdminDomainsPage() {
 
                                 {domain.isActive ? (
                                   <DropdownMenuItem
-                                    onClick={(e) => {
-                                      e.preventDefault();
+                                    onClick={() =>
                                       handleToggleDomainStatus(
                                         domain._id,
                                         false
-                                      );
-                                    }}
+                                      )
+                                    }
                                     className="text-orange-600"
                                   >
                                     <XCircle className="mr-2 h-4 w-4" />
@@ -1164,13 +1210,9 @@ export default function AdminDomainsPage() {
                                   </DropdownMenuItem>
                                 ) : (
                                   <DropdownMenuItem
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      handleToggleDomainStatus(
-                                        domain._id,
-                                        true
-                                      );
-                                    }}
+                                    onClick={() =>
+                                      handleToggleDomainStatus(domain._id, true)
+                                    }
                                     className="text-green-600"
                                   >
                                     <CheckCircle className="mr-2 h-4 w-4" />
@@ -1179,14 +1221,7 @@ export default function AdminDomainsPage() {
                                 )}
 
                                 <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    // Add your SSL settings logic here
-                                    console.log(
-                                      "SSL settings for:",
-                                      domain.domain
-                                    );
-                                  }}
+                                  onClick={() => handleSSLSettings(domain._id)}
                                 >
                                   <Key className="mr-2 h-4 w-4" />
                                   SSL Settings
@@ -1195,10 +1230,7 @@ export default function AdminDomainsPage() {
                                 <DropdownMenuSeparator />
 
                                 <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    setDeletingDomain(domain._id);
-                                  }}
+                                  onClick={() => setDeletingDomain(domain._id)}
                                   className="text-red-600"
                                 >
                                   <Trash2 className="mr-2 h-4 w-4" />

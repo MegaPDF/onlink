@@ -1,4 +1,3 @@
-// app/api/admin/domains/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { connectDB } from '@/lib/mongodb';
@@ -7,7 +6,6 @@ import { User } from '@/models/User';
 import { AuditLog } from '@/models/AuditLog';
 import { authOptions } from '@/lib/auth';
 import { nanoid } from 'nanoid';
-import { CreateDomainSchema } from '@/lib/validations/domain';
 
 // Get all domains with pagination and filtering
 export async function GET(req: NextRequest) {
@@ -24,15 +22,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = req.nextUrl;
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const search = searchParams.get('search') || '';
-    const type = searchParams.get('type');
-    const status = searchParams.get('status');
-    const verification = searchParams.get('verification');
-    const sortBy = searchParams.get('sortBy') || 'createdAt';
-    const sortOrder = searchParams.get('sortOrder') || 'desc';
+    // Get search params from URL
+    const url = new URL(req.url);
+    const page = parseInt(url.searchParams.get('page') || '1');
+    const limit = parseInt(url.searchParams.get('limit') || '20');
+    const search = url.searchParams.get('search') || '';
+    const type = url.searchParams.get('type');
+    const status = url.searchParams.get('status');
+    const verification = url.searchParams.get('verification');
+    const sortBy = url.searchParams.get('sortBy') || 'createdAt';
+    const sortOrder = url.searchParams.get('sortOrder') || 'desc';
 
     // Build query
     const query: any = { isDeleted: { $ne: true } };
@@ -73,7 +72,10 @@ export async function GET(req: NextRequest) {
       .skip(skip)
       .lean();
 
-    // Calculate stats
+    // Calculate stats including SSL expiring soon
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+
     const stats = await Domain.aggregate([
       { $match: { isDeleted: { $ne: true } } },
       {
@@ -85,6 +87,22 @@ export async function GET(req: NextRequest) {
           verifiedDomains: { $sum: { $cond: ['$isVerified', 1, 0] } },
           customDomains: { $sum: { $cond: [{ $eq: ['$type', 'custom'] }, 1, 0] } },
           systemDomains: { $sum: { $cond: [{ $eq: ['$type', 'system'] }, 1, 0] } },
+          sslExpiringSoon: { 
+            $sum: { 
+              $cond: [
+                { 
+                  $and: [
+                    { $ne: ['$ssl.validTo', null] },
+                    { $lte: ['$ssl.validTo', thirtyDaysFromNow] },
+                    { $gte: ['$ssl.validTo', now] }
+                  ]
+                }, 
+                1, 
+                0
+              ] 
+            }
+          },
+          totalLinks: { $sum: '$usage.linksCount' }
         }
       }
     ]);
@@ -95,7 +113,9 @@ export async function GET(req: NextRequest) {
       inactiveDomains: 0,
       verifiedDomains: 0,
       customDomains: 0,
-      systemDomains: 0
+      systemDomains: 0,
+      sslExpiringSoon: 0,
+      totalLinks: 0
     };
 
     return NextResponse.json({
@@ -136,11 +156,17 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const validatedData = CreateDomainSchema.parse(body);
+
+    // Basic validation
+    if (!body.domain || !body.type) {
+      return NextResponse.json({ 
+        error: 'Domain and type are required' 
+      }, { status: 400 });
+    }
 
     // Check if domain already exists
     const existingDomain = await Domain.findOne({ 
-      domain: validatedData.domain.toLowerCase().trim(),
+      domain: body.domain.toLowerCase().trim(),
       isDeleted: { $ne: true }
     });
 
@@ -162,20 +188,20 @@ export async function POST(req: NextRequest) {
       verifiedAt?: Date;
     }> = [];
     
-    if (validatedData.verificationMethod === 'dns') {
+    if (body.verificationMethod === 'dns') {
       dnsRecords.push({
         type: 'TXT',
-        name: `_verification.${validatedData.domain}`,
+        name: `_verification.${body.domain}`,
         value: verificationCode,
         verified: false
       });
     }
 
     // For system domains, also add A record
-    if (validatedData.type === 'system') {
+    if (body.type === 'system') {
       dnsRecords.push({
         type: 'A',
-        name: validatedData.domain,
+        name: body.domain,
         value: process.env.SERVER_IP || '127.0.0.1',
         verified: false
       });
@@ -183,24 +209,24 @@ export async function POST(req: NextRequest) {
       // Add CNAME for www subdomain
       dnsRecords.push({
         type: 'CNAME',
-        name: `www.${validatedData.domain}`,
-        value: validatedData.domain,
+        name: `www.${body.domain}`,
+        value: body.domain,
         verified: false
       });
     }
 
     const newDomain = new Domain({
-      domain: validatedData.domain.toLowerCase().trim(),
-      type: validatedData.type,
-      isCustom: validatedData.type === 'custom',
-      isVerified: validatedData.type === 'system', // System domains auto-verified
-      isActive: validatedData.type === 'system',
+      domain: body.domain.toLowerCase().trim(),
+      type: body.type,
+      isCustom: body.type === 'custom',
+      isVerified: body.type === 'system', // System domains auto-verified
+      isActive: body.type === 'system',
       verificationCode,
-      verificationMethod: validatedData.verificationMethod,
+      verificationMethod: body.verificationMethod || 'dns',
       dnsRecords,
       settings: {
         redirectType: 301,
-        forceHttps: validatedData.type === 'system' ? false : true, // Dev mode
+        forceHttps: body.type === 'system' ? false : true, // Dev mode
         enableCompression: true,
         cacheControl: 'public, max-age=3600',
         branding: {},
@@ -215,8 +241,9 @@ export async function POST(req: NextRequest) {
         }
       },
       ssl: {
-        provider: validatedData.sslProvider || 'letsencrypt',
-        autoRenew: validatedData.autoRenew !== false
+        provider: body.sslProvider || 'letsencrypt',
+        autoRenew: body.autoRenew !== false,
+        status: 'pending'
       },
       usage: {
         linksCount: 0,
@@ -288,8 +315,8 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = req.nextUrl;
-    const domainId = searchParams.get('domainId');
+    const url = new URL(req.url);
+    const domainId = url.searchParams.get('domainId');
     const body = await req.json();
 
     if (!domainId) {
@@ -393,7 +420,7 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-// Delete domain - THIS WAS MISSING!
+// Delete domain
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -408,8 +435,8 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { searchParams } = req.nextUrl;
-    const domainId = searchParams.get('domainId');
+    const url = new URL(req.url);
+    const domainId = url.searchParams.get('domainId');
 
     if (!domainId) {
       return NextResponse.json({ error: 'Domain ID is required' }, { status: 400 });
@@ -418,21 +445,6 @@ export async function DELETE(req: NextRequest) {
     const domain = await Domain.findById(domainId);
     if (!domain || domain.isDeleted) {
       return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
-    }
-
-    // Check if domain has active links
-    const { URL } = await import('@/models/URL');
-    const activeLinksCount = await URL.countDocuments({
-      domain: domain.domain,
-      isDeleted: { $ne: true },
-      isActive: true
-    });
-
-    if (activeLinksCount > 0) {
-      return NextResponse.json({ 
-        error: `Cannot delete domain. It has ${activeLinksCount} active links. Please deactivate or move the links first.`,
-        activeLinks: activeLinksCount
-      }, { status: 409 });
     }
 
     // Soft delete the domain
@@ -455,7 +467,6 @@ export async function DELETE(req: NextRequest) {
         metadata: {
           domain: domain.domain,
           type: domain.type,
-          wasVerified: domain.isVerified,
           linksCount: domain.usage?.linksCount || 0
         }
       },
@@ -469,7 +480,7 @@ export async function DELETE(req: NextRequest) {
       },
       risk: {
         level: 'high',
-        factors: ['admin_action', 'domain_deletion'],
+        factors: ['admin_action', 'domain_deletion', 'data_loss'],
         score: 80
       }
     });
