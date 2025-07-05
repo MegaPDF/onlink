@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     // Merge stats with folders - UNCOMMENTED AND FIXED
     const foldersWithStats = folders.map(folder => {
       const stats = folderStats.find(stat => 
-        stat._id.toString() === folder.id.toString()
+        stat._id === folder.id
       );
       
       return {
@@ -257,7 +257,6 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-// Delete folder
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -268,7 +267,7 @@ export async function DELETE(req: NextRequest) {
     await connectDB();
 
     const folderId = req.nextUrl.searchParams.get('folderId');
-    const moveToFolder = req.nextUrl.searchParams.get('moveToFolder'); // Optional: move URLs to another folder
+    const moveToFolder = req.nextUrl.searchParams.get('moveToFolder');
 
     if (!folderId) {
       return NextResponse.json({ error: 'Folder ID is required' }, { status: 400 });
@@ -284,40 +283,33 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 });
     }
 
-    // Check if folder has URLs
-    const urlCount = await URL.countDocuments({
-      folderId,
-      isDeleted: false
-    });
+    console.log('🗑️ HARD DELETE (bulk): Permanently removing folder from database:', folder.name);
 
-    if (urlCount > 0) {
-      if (moveToFolder) {
-        // Move URLs to specified folder
-        await URL.updateMany(
-          { folderId, isDeleted: false },
-          { folderId: moveToFolder === 'null' ? null : moveToFolder }
-        );
-      } else {
-        // Move URLs to root (no folder)
-        await URL.updateMany(
-          { folderId, isDeleted: false },
-          { $unset: { folderId: 1 } }
-        );
-      }
+    // Handle URLs in this folder
+    if (moveToFolder && moveToFolder !== 'null') {
+      await URL.updateMany(
+        { folderId, isDeleted: false },
+        { folderId: moveToFolder }
+      );
+      console.log(`✅ Moved URLs to folder: ${moveToFolder}`);
+    } else {
+      await URL.updateMany(
+        { folderId, isDeleted: false },
+        { $unset: { folderId: 1 } }
+      );
+      console.log('✅ Moved URLs to uncategorized');
     }
 
-    // Delete child folders recursively
-    await deleteChildFolders(folderId, session.user.id);
+    // Delete child folders recursively (HARD DELETE)
+    await hardDeleteChildFoldersBulk(folderId, session.user.id);
 
-    // Soft delete the folder
-    await Folder.findByIdAndUpdate(folderId, {
-      isDeleted: true,
-      deletedAt: new Date()
-    });
+    // FIXED: Actually delete the folder from database
+    await Folder.findByIdAndDelete(folderId);
+    console.log('✅ Folder PERMANENTLY DELETED from database (bulk):', folder.name);
 
     return NextResponse.json({
       success: true,
-      message: 'Folder deleted successfully'
+      message: 'Folder permanently deleted from database'
     });
 
   } catch (error) {
@@ -326,7 +318,8 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-async function deleteChildFolders(parentId: string, userId: string) {
+// Helper function for bulk hard delete
+async function hardDeleteChildFoldersBulk(parentId: string, userId: string) {
   const childFolders = await Folder.find({
     parentId,
     userId,
@@ -335,18 +328,16 @@ async function deleteChildFolders(parentId: string, userId: string) {
 
   for (const child of childFolders) {
     // Recursively delete children
-    await deleteChildFolders(child._id.toString(), userId);
+    await hardDeleteChildFoldersBulk(child._id.toString(), userId);
     
-    // Move URLs to root
+    // Move URLs to uncategorized
     await URL.updateMany(
       { folderId: child._id, isDeleted: false },
       { $unset: { folderId: 1 } }
     );
     
-    // Delete folder
-    await Folder.findByIdAndUpdate(child._id, {
-      isDeleted: true,
-      deletedAt: new Date()
-    });
+    // FIXED: Actually delete child folder from database
+    await Folder.findByIdAndDelete(child._id);
+    console.log(`✅ Child folder PERMANENTLY DELETED (bulk): ${child.name}`);
   }
 }

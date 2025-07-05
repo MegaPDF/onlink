@@ -105,7 +105,6 @@ const UserSchema = new Schema<IUser>({
     enum: ['free', 'premium', 'enterprise'], 
     default: 'free'
   },
-  
   subscription: {
     stripeCustomerId: { type: String },
     stripeSubscriptionId: { type: String },

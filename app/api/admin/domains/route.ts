@@ -6,6 +6,8 @@ import { User } from '@/models/User';
 import { AuditLog } from '@/models/AuditLog';
 import { authOptions } from '@/lib/auth';
 import { nanoid } from 'nanoid';
+import { Analytics } from '@/models/Analytics';
+import { URL } from '@/models/URL';
 
 // Get all domains with pagination and filtering
 export async function GET(req: NextRequest) {
@@ -435,9 +437,8 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const url = new URL(req.url);
-    const domainId = url.searchParams.get('domainId');
-
+    const domainId = req.nextUrl.searchParams.get('domainId');
+    
     if (!domainId) {
       return NextResponse.json({ error: 'Domain ID is required' }, { status: 400 });
     }
@@ -447,28 +448,60 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Domain not found' }, { status: 404 });
     }
 
-    // Soft delete the domain
-    await Domain.findByIdAndUpdate(domainId, {
-      isDeleted: true,
-      deletedAt: new Date(),
-      isActive: false
-    });
+    console.log('🗑️ HARD DELETE: Permanently removing domain from database:', domain.domain);
 
-    // Create audit log
+    // STEP 1: Find all URLs using this domain
+    const urlsUsingDomain = await URL.find({ domain: domain.domain });
+    console.log(`Found ${urlsUsingDomain.length} URLs using this domain`);
+
+    // STEP 2: Delete analytics for all URLs using this domain
+    let analyticsDeleted = 0;
+    for (const url of urlsUsingDomain) {
+      const result = await Analytics.deleteMany({ shortCode: url.shortCode });
+      analyticsDeleted += result.deletedCount;
+    }
+    console.log(`✅ Deleted ${analyticsDeleted} analytics records`);
+
+    // STEP 3: Handle URLs using this domain
+    const shouldDeleteUrls = req.nextUrl.searchParams.get('deleteUrls') === 'true';
+    
+    if (shouldDeleteUrls) {
+      // Delete all URLs using this domain
+      const urlsDeleted = await URL.deleteMany({ domain: domain.domain });
+      console.log(`✅ Deleted ${urlsDeleted.deletedCount} URLs using this domain`);
+    } else {
+      // Move URLs to default domain
+      const defaultDomain = process.env.NEXT_PUBLIC_BASE_URL || 'localhost:3000';
+      const urlsUpdated = await URL.updateMany(
+        { domain: domain.domain },
+        { domain: defaultDomain }
+      );
+      console.log(`✅ Moved ${urlsUpdated.modifiedCount} URLs to default domain: ${defaultDomain}`);
+    }
+
+    // STEP 4: Delete any SSL certificates or DNS records (if you store them)
+    // Add your specific domain-related cleanup here
+
+    // STEP 5: FIXED - Actually delete the domain from database
+    await Domain.findByIdAndDelete(domainId);
+    console.log('✅ Domain PERMANENTLY DELETED from database:', domain.domain);
+
+    // STEP 6: Create audit log
     const auditLog = new AuditLog({
       userId: session.user.id,
       userEmail: currentUser.email,
       userName: currentUser.name,
-      action: 'delete_domain',
+      action: 'hard_delete_domain',
       resource: 'domain',
       resourceId: domainId,
       details: {
         method: 'DELETE',
-        metadata: {
-          domain: domain.domain,
-          type: domain.type,
-          linksCount: domain.usage?.linksCount || 0
-        }
+        type: 'permanent',
+        domain: domain.domain,
+        domainType: domain.type,
+        urlsAffected: urlsUsingDomain.length,
+        analyticsDeleted,
+        urlsDeleted: shouldDeleteUrls
       },
       context: {
         ip: req.headers.get('x-forwarded-for') || '127.0.0.1',
@@ -480,8 +513,8 @@ export async function DELETE(req: NextRequest) {
       },
       risk: {
         level: 'high',
-        factors: ['admin_action', 'domain_deletion', 'data_loss'],
-        score: 80
+        factors: ['admin_action', 'domain_deletion', 'url_impact'],
+        score: 85
       }
     });
 
@@ -489,7 +522,13 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Domain deleted successfully'
+      message: 'Domain permanently deleted from database',
+      deletedData: {
+        domain: domain.domain,
+        urlsAffected: urlsUsingDomain.length,
+        analyticsDeleted,
+        urlsDeleted: shouldDeleteUrls
+      }
     });
 
   } catch (error) {

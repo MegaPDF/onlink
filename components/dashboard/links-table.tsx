@@ -1,3 +1,4 @@
+// Fixed components/dashboard/links-table.tsx
 
 "use client";
 
@@ -56,6 +57,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Search,
   Filter,
@@ -78,13 +80,15 @@ import {
   Pause,
   Play,
   Settings,
+  AlertTriangle,
 } from "lucide-react";
 import { formatNumber } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 
 interface Link {
-  id: string;
+  _id: string; // FIXED: Use _id as primary identifier
+  id?: string; // Keep for backward compatibility
   originalUrl: string;
   shortUrl: string;
   shortCode: string;
@@ -135,6 +139,13 @@ export function LinksTable({
 
   const fetchLinks = async () => {
     try {
+      console.log("🔄 Fetching links with params:", {
+        folderId: selectedFolder,
+        search,
+        statusFilter,
+        tagFilter,
+      });
+
       const params = new URLSearchParams({
         page: page.toString(),
         limit: "10",
@@ -143,21 +154,34 @@ export function LinksTable({
         ...(search && { search }),
         ...(statusFilter !== "all" && { status: statusFilter }),
         ...(tagFilter !== "all" && tagFilter && { tag: tagFilter }),
-        ...(selectedFolder && selectedFolder !== "all" && { folderId: selectedFolder }),
+        ...(selectedFolder &&
+          selectedFolder !== "all" && { folderId: selectedFolder }),
       });
 
       const response = await fetch(`/api/client/my-links?${params}`);
       const result = await response.json();
 
+      console.log("📡 Links API response:", response.status, result);
+
       if (response.ok) {
-        setLinks(result.data.urls || []);
+        // FIXED: Ensure each link has both _id and id for compatibility
+        const processedLinks = (result.data.urls || []).map((link: any) => ({
+          ...link,
+          id: link._id || link.id, // Ensure id exists for compatibility
+        }));
+
+        setLinks(processedLinks);
         setTotalPages(result.data.pagination?.totalPages || 1);
         setTags(result.data.tags || []);
+
+        console.log("✅ Links loaded:", processedLinks.length);
       } else {
+        console.error("❌ Links API error:", result);
         toast.error("Failed to fetch links");
         setLinks([]);
       }
     } catch (error) {
+      console.error("💥 Links fetch error:", error);
       toast.error("Error loading links");
       setLinks([]);
     } finally {
@@ -198,6 +222,82 @@ export function LinksTable({
     toast.success("Copied to clipboard!");
   };
 
+  // FIXED: Correct delete function with proper API endpoint and ID handling
+  const handleDelete = async (link: Link) => {
+    try {
+      const linkId = link._id || link.id;
+      console.log("🗑️ Deleting link:", linkId, link.shortCode);
+
+      if (!linkId) {
+        toast.error("Cannot delete link: Invalid link ID");
+        return;
+      }
+
+      // FIXED: Use correct API endpoint with urlId parameter
+      const response = await fetch(`/api/client/my-links?urlId=${linkId}`, {
+        method: "DELETE",
+      });
+
+      const result = await response.json();
+      console.log("🗑️ Delete response:", response.status, result);
+
+      if (response.ok) {
+        toast.success("Link deleted successfully");
+        fetchLinks(); // Refresh the list
+      } else {
+        console.error("❌ Delete failed:", result);
+        toast.error(result.error || "Failed to delete link");
+      }
+    } catch (error) {
+      console.error("💥 Delete error:", error);
+      toast.error("Error deleting link");
+    }
+  };
+
+  // FIXED: Correct toggle status function
+  const handleToggleStatus = async (link: Link) => {
+    try {
+      const linkId = link._id || link.id;
+      console.log(
+        "🔄 Toggling status for link:",
+        linkId,
+        link.shortCode,
+        "current:",
+        link.isActive
+      );
+
+      if (!linkId) {
+        toast.error("Cannot update link: Invalid link ID");
+        return;
+      }
+
+      // FIXED: Use correct API endpoint with urlId parameter
+      const response = await fetch(`/api/client/my-links?urlId=${linkId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ isActive: !link.isActive }),
+      });
+
+      const result = await response.json();
+      console.log("🔄 Toggle response:", response.status, result);
+
+      if (response.ok) {
+        toast.success(
+          `Link ${!link.isActive ? "activated" : "deactivated"} successfully`
+        );
+        fetchLinks(); // Refresh the list
+      } else {
+        console.error("❌ Toggle failed:", result);
+        toast.error(result.error || "Failed to update link status");
+      }
+    } catch (error) {
+      console.error("💥 Toggle error:", error);
+      toast.error("Error updating link status");
+    }
+  };
+
   const handleSort = (field: string) => {
     if (sortBy === field) {
       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
@@ -211,53 +311,16 @@ export function LinksTable({
     if (selectedLinks.length === links.length) {
       setSelectedLinks([]);
     } else {
-      setSelectedLinks(links.map(link => link.id));
+      // FIXED: Use _id consistently
+      setSelectedLinks(links.map((link) => link._id || link.id).filter((id): id is string => typeof id === "string"));
     }
   };
 
   const selectLink = (linkId: string) => {
     if (selectedLinks.includes(linkId)) {
-      setSelectedLinks(selectedLinks.filter(id => id !== linkId));
+      setSelectedLinks(selectedLinks.filter((id) => id !== linkId));
     } else {
       setSelectedLinks([...selectedLinks, linkId]);
-    }
-  };
-
-  const handleDelete = async (linkId: string) => {
-    try {
-      const response = await fetch(`/api/client/links/${linkId}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        toast.success("Link deleted successfully");
-        fetchLinks();
-      } else {
-        toast.error("Failed to delete link");
-      }
-    } catch (error) {
-      toast.error("Error deleting link");
-    }
-  };
-
-  const handleToggleStatus = async (linkId: string, isActive: boolean) => {
-    try {
-      const response = await fetch(`/api/client/links/${linkId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ isActive: !isActive }),
-      });
-
-      if (response.ok) {
-        toast.success(`Link ${!isActive ? 'activated' : 'deactivated'} successfully`);
-        fetchLinks();
-      } else {
-        toast.error("Failed to update link status");
-      }
-    } catch (error) {
-      toast.error("Error updating link status");
     }
   };
 
@@ -284,6 +347,13 @@ export function LinksTable({
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* Debug Info */}
+        <div className="text-xs text-muted-foreground bg-muted p-2 rounded mb-4">
+          <strong>Debug:</strong> {links.length} links loaded, selectedFolder: "
+          {selectedFolder || "none"}", folderId prop: "{folderId || "undefined"}
+          "
+        </div>
+
         {/* Filters */}
         <div className="flex items-center gap-4 mb-6">
           <div className="relative flex-1">
@@ -308,9 +378,11 @@ export function LinksTable({
           </Select>
 
           {showFolderFilter && (
-            <Select 
-              value={selectedFolder === "" ? "all" : selectedFolder} 
-              onValueChange={(value) => setSelectedFolder(value === "all" ? "" : value)}
+            <Select
+              value={selectedFolder === "" ? "all" : selectedFolder}
+              onValueChange={(value) =>
+                setSelectedFolder(value === "all" ? "" : value)
+              }
             >
               <SelectTrigger className="w-40">
                 <SelectValue placeholder="All Folders" />
@@ -319,8 +391,8 @@ export function LinksTable({
                 <SelectItem value="all">All Folders</SelectItem>
                 <SelectItem value="null">Uncategorized</SelectItem>
                 {folders.map((folder, folderIndex) => (
-                  <SelectItem 
-                    key={`folder-select-${folder._id}-${folderIndex}`} 
+                  <SelectItem
+                    key={`folder-select-${folder._id}-${folderIndex}`}
                     value={folder._id}
                   >
                     <div className="flex items-center gap-2">
@@ -337,22 +409,21 @@ export function LinksTable({
           )}
 
           {tags.length > 0 && (
-            <Select 
-              value={tagFilter === "" ? "all" : tagFilter} 
-              onValueChange={(value) => setTagFilter(value === "all" ? "" : value)}
+            <Select
+              value={tagFilter === "" ? "all" : tagFilter}
+              onValueChange={(value) =>
+                setTagFilter(value === "all" ? "" : value)
+              }
             >
               <SelectTrigger className="w-32">
-                <SelectValue placeholder="All Tags" />
+                <SelectValue placeholder="Tags" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Tags</SelectItem>
                 {tags.map((tag, tagIndex) => (
-                  <SelectItem 
-                    key={`tag-select-${tagIndex}-${tag}`} 
-                    value={tag}
-                  >
+                  <SelectItem key={`tag-${tag}-${tagIndex}`} value={tag}>
                     <div className="flex items-center gap-2">
-                      <Tag className="w-3 h-3" />
+                      <Tag className="h-3 w-3" />
                       {tag}
                     </div>
                   </SelectItem>
@@ -362,262 +433,248 @@ export function LinksTable({
           )}
         </div>
 
-        {/* Bulk Actions */}
-        {selectedLinks.length > 0 && (
-          <div className="mb-4 p-4 bg-muted rounded-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">
-                {selectedLinks.length} link{selectedLinks.length !== 1 ? 's' : ''} selected
-              </span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm">
-                  <Folder className="w-4 h-4 mr-2" />
-                  Move to Folder
-                </Button>
-                <Button variant="outline" size="sm">
-                  <Pause className="w-4 h-4 mr-2" />
-                  Deactivate
-                </Button>
-                <Button variant="destructive" size="sm">
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Links Table */}
         {links.length === 0 ? (
           <EmptyState
             icon={Globe}
             title="No links found"
             description="Create your first shortened link to get started."
-            action={{
-              label: "Create Link",
-              onClick: () => {
-                // TODO: Implement create link action, e.g., open a modal or navigate
-              },
-              variant: "default",
-            }}
           />
         ) : (
-          <>
+          <div className="space-y-4">
+            {/* Bulk Actions */}
+            {selectedLinks.length > 0 && (
+              <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+                <span className="text-sm font-medium">
+                  {selectedLinks.length} link(s) selected
+                </span>
+                <Button variant="outline" size="sm">
+                  Bulk Delete
+                </Button>
+                <Button variant="outline" size="sm">
+                  Bulk Toggle Status
+                </Button>
+              </div>
+            )}
+
+            {/* Table */}
             <div className="rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[50px]">
-                      <input
-                        type="checkbox"
-                        checked={
-                          selectedLinks.length === links.length &&
-                          links.length > 0
-                        }
-                        onChange={selectAllLinks}
-                        className="rounded border-gray-300"
+                    <TableHead className="w-12">
+                      <Checkbox
+                        checked={selectedLinks.length === links.length}
+                        onCheckedChange={selectAllLinks}
                       />
                     </TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => handleSort("originalUrl")}
-                    >
-                      Original URL
-                    </TableHead>
-                    <TableHead>Short URL</TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => handleSort("clicks.total")}
-                    >
-                      Clicks
-                    </TableHead>
+                    <TableHead>Link</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Folder</TableHead>
+                    <TableHead>Clicks</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => handleSort("createdAt")}
-                    >
-                      Created
-                    </TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="w-12"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {links.map((link, linkIndex) => (
-                    <TableRow key={`link-row-${link.id}-${linkIndex}`}>
-                      <TableCell>
-                        <input
-                          type="checkbox"
-                          checked={selectedLinks.includes(link.id)}
-                          onChange={() => selectLink(link.id)}
-                          className="rounded border-gray-300"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="font-medium text-sm">
-                            {link.title || new URL(link.originalUrl).hostname}
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate max-w-[300px]">
-                            {link.originalUrl}
-                          </div>
-                          {link.tags.length > 0 && (
-                            <div className="flex gap-1 flex-wrap">
-                              {link.tags.slice(0, 2).map((tag, tagIndex) => (
-                                <Badge 
-                                  key={`link-${link.id}-tag-${tagIndex}-${tag}`} 
-                                  variant="secondary" 
-                                  className="text-xs"
-                                >
-                                  {tag}
-                                </Badge>
-                              ))}
-                              {link.tags.length > 2 && (
-                                <Badge 
-                                  key={`link-${link.id}-more-tags`}
-                                  variant="secondary" 
-                                  className="text-xs"
-                                >
-                                  +{link.tags.length - 2}
-                                </Badge>
-                              )}
+                  {links.map((link, index) => {
+                    const linkId = link._id || link.id;
+                    return (
+                      <TableRow key={`link-${linkId}-${index}`}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedLinks.includes(linkId ?? "")}
+                            onCheckedChange={() => selectLink(linkId?? "")}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="link"
+                                className="p-0 h-auto text-primary text-sm font-mono"
+                                onClick={() => copyToClipboard(link.shortUrl)}
+                              >
+                                {link.shortCode}
+                              </Button>
+                              <Copy className="h-3 w-3 text-muted-foreground" />
                             </div>
+                            <div className="text-xs text-muted-foreground truncate max-w-xs">
+                              {link.originalUrl}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="max-w-xs">
+                            {link.title ? (
+                              <div className="font-medium truncate">
+                                {link.title}
+                              </div>
+                            ) : (
+                              <div className="text-muted-foreground text-sm">
+                                No title
+                              </div>
+                            )}
+                            {link.description && (
+                              <div className="text-xs text-muted-foreground truncate">
+                                {link.description}
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {link.folder ? (
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-3 h-3 rounded-full"
+                                style={{ backgroundColor: link.folder.color }}
+                              />
+                              <span className="text-sm">
+                                {link.folder.name}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">
+                              Uncategorized
+                            </span>
                           )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <code className="text-sm bg-muted px-2 py-1 rounded">
-                            {link.shortUrl}
-                          </code>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => copyToClipboard(link.shortUrl)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            <div className="font-medium">
+                              {formatNumber(link.clicks.total)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatNumber(link.clicks.unique)} unique
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={link.isActive ? "default" : "secondary"}
                           >
-                            <Copy className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <MousePointer className="w-3 h-3 text-muted-foreground" />
-                            <span className="font-medium">{formatNumber(link.clicks.total)}</span>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {formatNumber(link.clicks.unique)} unique
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <Badge variant={link.isActive ? "default" : "secondary"}>
                             {link.isActive ? "Active" : "Inactive"}
                           </Badge>
-                          {link.expiresAt && (
-                            <div className="text-xs text-muted-foreground">
-                              Expires {formatDistanceToNow(new Date(link.expiresAt), { addSuffix: true })}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-xs text-muted-foreground">
-                          {formatDistanceToNow(new Date(link.createdAt), { addSuffix: true })}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreHorizontal className="w-4 h-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => copyToClipboard(link.shortUrl)}>
-                              <Copy className="w-4 h-4 mr-2" />
-                              Copy Link
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <BarChart3 className="w-4 h-4 mr-2" />
-                              Analytics
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <QrCode className="w-4 h-4 mr-2" />
-                              QR Code
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem>
-                              <Edit className="w-4 h-4 mr-2" />
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              onClick={() => handleToggleStatus(link.id, link.isActive)}
-                            >
-                              {link.isActive ? (
-                                <>
-                                  <Pause className="w-4 h-4 mr-2" />
-                                  Deactivate
-                                </>
-                              ) : (
-                                <>
-                                  <Play className="w-4 h-4 mr-2" />
-                                  Activate
-                                </>
-                              )}
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <DropdownMenuItem 
-                                  className="text-destructive focus:text-destructive"
-                                  onSelect={(e) => e.preventDefault()}
-                                >
-                                  <Trash2 className="w-4 h-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    This action cannot be undone. This will permanently delete your link.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction 
-                                    onClick={() => handleDelete(link.id)}
-                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm text-muted-foreground">
+                            {formatDistanceToNow(new Date(link.createdAt), {
+                              addSuffix: true,
+                            })}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => copyToClipboard(link.shortUrl)}
+                              >
+                                <Copy className="mr-2 h-4 w-4" />
+                                Copy Link
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  window.open(link.originalUrl, "_blank")
+                                }
+                              >
+                                <ExternalLink className="mr-2 h-4 w-4" />
+                                Visit Original
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <BarChart3 className="mr-2 h-4 w-4" />
+                                Analytics
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <QrCode className="mr-2 h-4 w-4" />
+                                QR Code
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem>
+                                <Edit className="mr-2 h-4 w-4" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleToggleStatus(link)}
+                              >
+                                {link.isActive ? (
+                                  <>
+                                    <Pause className="mr-2 h-4 w-4" />
+                                    Deactivate
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="mr-2 h-4 w-4" />
+                                    Activate
+                                  </>
+                                )}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <DropdownMenuItem
+                                    onSelect={(e) => e.preventDefault()}
+                                    className="text-destructive focus:text-destructive"
                                   >
+                                    <Trash2 className="mr-2 h-4 w-4" />
                                     Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                                  </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle className="flex items-center gap-2">
+                                      <AlertTriangle className="h-5 w-5 text-destructive" />
+                                      Delete Link
+                                    </AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Are you sure you want to delete "
+                                      {link.shortCode}"? This action cannot be
+                                      undone and will break any existing
+                                      references to this short URL.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>
+                                      Cancel
+                                    </AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() => handleDelete(link)}
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    >
+                                      Delete Link
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between mt-4">
+              <div className="flex items-center justify-between">
                 <div className="text-sm text-muted-foreground">
                   Page {page} of {totalPages}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setPage(Math.max(1, page - 1))}
                     disabled={page === 1}
                   >
-                    <ChevronLeft className="w-4 h-4 mr-2" />
+                    <ChevronLeft className="h-4 w-4" />
                     Previous
                   </Button>
                   <Button
@@ -627,12 +684,12 @@ export function LinksTable({
                     disabled={page === totalPages}
                   >
                     Next
-                    <ChevronRight className="w-4 h-4 ml-2" />
+                    <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
       </CardContent>
     </Card>

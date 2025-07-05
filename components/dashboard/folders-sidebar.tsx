@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -34,6 +33,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   FolderPlus,
   MoreHorizontal,
@@ -171,6 +177,17 @@ export function FoldersSidebar({
     } catch (error) {
       toast.error("Error creating folder");
     }
+  };
+
+  // NEW: Handle subfolder creation
+  const handleCreateSubfolder = (parentFolder: FolderData) => {
+    setCreateForm({
+      name: "",
+      description: "",
+      color: "#3B82F6",
+      parentId: parentFolder._id, // Set the parent ID
+    });
+    setCreateDialogOpen(true);
   };
 
   const handleEditFolder = async () => {
@@ -326,9 +343,18 @@ export function FoldersSidebar({
                 <Edit className="w-4 h-4 mr-2" />
                 Edit
               </DropdownMenuItem>
-              <DropdownMenuItem>
+              {/* FIXED: Add onClick handler for subfolder creation */}
+              <DropdownMenuItem
+                onClick={() => handleCreateSubfolder(folder)}
+                disabled={folder.level >= 4} // Prevent too deep nesting
+              >
                 <FolderPlus className="w-4 h-4 mr-2" />
                 Add Subfolder
+                {folder.level >= 4 && (
+                  <span className="text-xs text-muted-foreground ml-auto">
+                    (Max depth)
+                  </span>
+                )}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <AlertDialog>
@@ -402,9 +428,15 @@ export function FoldersSidebar({
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Create New Folder</DialogTitle>
+                <DialogTitle>
+                  {createForm.parentId
+                    ? "Create Subfolder"
+                    : "Create New Folder"}
+                </DialogTitle>
                 <DialogDescription>
-                  Organize your links into folders for better management.
+                  {createForm.parentId
+                    ? "Create a subfolder to organize your links hierarchically."
+                    : "Organize your links into folders for better management."}
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
@@ -425,6 +457,55 @@ export function FoldersSidebar({
                     })
                   }
                 />
+
+                {/* Parent Folder Selection - Only show when not creating a subfolder */}
+                {!createForm.parentId && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Parent Folder (Optional)
+                    </label>
+                    <Select
+                      value={createForm.parentId}
+                      onValueChange={(value) =>
+                        setCreateForm({
+                          ...createForm,
+                          parentId: value === "root" ? "" : value,
+                        })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select parent folder" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="root">Root (No parent)</SelectItem>
+                        {flatFolders
+                          .filter((f) => f.level < 4) // Don't allow creating subfolder under level 4
+                          .map((folder) => (
+                            <SelectItem key={folder._id} value={folder._id}>
+                              {"  ".repeat(folder.level)}📁 {folder.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Show parent info when creating subfolder */}
+                {createForm.parentId && (
+                  <div className="p-3 bg-muted rounded-lg">
+                    <div className="text-sm font-medium">
+                      Creating subfolder under:
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      📁{" "}
+                      {
+                        flatFolders.find((f) => f._id === createForm.parentId)
+                          ?.name
+                      }
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
@@ -442,7 +523,15 @@ export function FoldersSidebar({
               <DialogFooter>
                 <Button
                   variant="outline"
-                  onClick={() => setCreateDialogOpen(false)}
+                  onClick={() => {
+                    setCreateDialogOpen(false);
+                    setCreateForm({
+                      name: "",
+                      description: "",
+                      color: "#3B82F6",
+                      parentId: "",
+                    });
+                  }}
                 >
                   Cancel
                 </Button>
@@ -450,7 +539,7 @@ export function FoldersSidebar({
                   onClick={handleCreateFolder}
                   disabled={!createForm.name}
                 >
-                  Create Folder
+                  {createForm.parentId ? "Create Subfolder" : "Create Folder"}
                 </Button>
               </DialogFooter>
             </DialogContent>

@@ -1,4 +1,4 @@
-// ============= Updated scripts/migrate.ts =============
+// scripts/migrate.ts
 import mongoose from 'mongoose';
 import * as dotenv from 'dotenv';
 import * as bcrypt from 'bcryptjs';
@@ -49,61 +49,72 @@ async function createIndexes() {
     
     // Team indexes
     await Team.collection.createIndex({ 'members.userId': 1 });
-    await Team.collection.createIndex({ ownerId: 1 });
     await Team.collection.createIndex({ slug: 1 }, { unique: true });
+    await Team.collection.createIndex({ ownerId: 1 });
+    await Team.collection.createIndex({ isDeleted: 1 });
     console.log('✅ Team indexes created');
     
     // Folder indexes
     await Folder.collection.createIndex({ userId: 1, isDeleted: 1 });
+    await Folder.collection.createIndex({ teamId: 1, isDeleted: 1 });
+    await Folder.collection.createIndex({ parentId: 1, isDeleted: 1 });
     await Folder.collection.createIndex({ path: 1 });
     console.log('✅ Folder indexes created');
     
+    // Settings indexes
+    await Settings.collection.createIndex({ lastModifiedBy: 1 });
+    console.log('✅ Settings indexes created');
+    
+    // AuditLog indexes
+    await AuditLog.collection.createIndex({ userId: 1, createdAt: -1 });
+    await AuditLog.collection.createIndex({ action: 1, createdAt: -1 });
+    await AuditLog.collection.createIndex({ resource: 1, createdAt: -1 });
+    await AuditLog.collection.createIndex({ createdAt: 1 }, { expireAfterSeconds: 31536000 }); // 1 year TTL
+    console.log('✅ AuditLog indexes created');
+    
     // Analytics indexes
-    await Analytics.collection.createIndex({ urlId: 1, timestamp: 1 });
-    await Analytics.collection.createIndex({ timestamp: 1 });
-    await Analytics.collection.createIndex({ 'location.country': 1 });
+    await Analytics.collection.createIndex({ urlId: 1, date: -1 });
+    await Analytics.collection.createIndex({ userId: 1, date: -1 });
+    await Analytics.collection.createIndex({ 'geo.country': 1, date: -1 });
+    await Analytics.collection.createIndex({ date: 1 }, { expireAfterSeconds: 31536000 }); // 1 year TTL
     console.log('✅ Analytics indexes created');
     
-    // Audit Log indexes
-    await AuditLog.collection.createIndex({ userId: 1, timestamp: 1 });
-    await AuditLog.collection.createIndex({ action: 1, resource: 1 });
-    await AuditLog.collection.createIndex({ timestamp: 1 });
-    console.log('✅ Audit Log indexes created');
+    console.log('🎉 All indexes created successfully!');
     
-    console.log('✅ All indexes created successfully');
   } catch (error) {
     console.error('❌ Error creating indexes:', error);
     throw error;
   }
 }
 
-async function createOrFixAdminUser() {
-  console.log('👤 Creating/fixing admin user...');
+async function seedDefaultData() {
+  console.log('🌱 Seeding default data...');
   
   try {
-    const { User } = await loadModels();
+    const { User, Settings, Domain } = await loadModels();
     
     // Check if admin user exists
-    let adminUser = await User.findOne({ 
-      email: 'admin@onlink.local',
-      isDeleted: false 
-    });
-
-    const adminPassword = 'admin123';
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
-
-    if (!adminUser) {
-      console.log('📝 Creating new admin user...');
+    const existingAdmin = await User.findOne({ email: 'admin@onlink.local' });
+    let adminUser;
+    
+    if (existingAdmin) {
+      console.log('ℹ️  Admin user already exists, skipping user creation...');
+      adminUser = existingAdmin;
+    } else {
+      // Create default admin user
+      const hashedPassword = await bcrypt.hash('admin123', 12);
       
-      // Create admin user with pre-hashed password to avoid middleware issues
       adminUser = await User.create({
-        name: 'System Admin',
+        name: 'System Administrator',
         email: 'admin@onlink.local',
-        password: hashedPassword, // Pre-hashed
+        password: hashedPassword,
         role: 'admin',
         plan: 'enterprise',
         isEmailVerified: true,
         isActive: true,
+        subscription: {
+          status: 'active'
+        },
         usage: {
           linksCount: 0,
           clicksCount: 0,
@@ -126,110 +137,59 @@ async function createOrFixAdminUser() {
             publicProfile: false,
             shareAnalytics: false
           }
-        },
-        security: {
-          twoFactorEnabled: false,
-          loginAttempts: 0,
-          ipWhitelist: []
         }
       });
 
-      console.log('✅ Admin user created successfully');
-      
-    } else {
-      console.log('✅ Admin user found');
-      
-      // Check if password exists and is valid
-      if (!adminUser.password) {
-        console.log('🔧 Admin user has no password, setting password...');
-        
-        // Update password directly in database to bypass middleware
-        await User.updateOne(
-          { _id: adminUser._id },
-          { 
-            $set: { 
-              password: hashedPassword,
-              'security.loginAttempts': 0,
-              'security.lockedUntil': null,
-              lastPasswordChange: new Date()
-            }
-          }
-        );
-        
-        console.log('✅ Admin password set successfully');
-        
-      } else {
-        console.log('✅ Admin user already has password');
-        
-        // Test if current password works
-        const isValidPassword = await bcrypt.compare(adminPassword, adminUser.password);
-        if (!isValidPassword) {
-          console.log('🔧 Admin password invalid, updating...');
-          
-          await User.updateOne(
-            { _id: adminUser._id },
-            { 
-              $set: { 
-                password: hashedPassword,
-                'security.loginAttempts': 0,
-                'security.lockedUntil': null,
-                lastPasswordChange: new Date()
-              }
-            }
-          );
-          
-          console.log('✅ Admin password updated successfully');
-        }
-      }
-      
-      // Ensure account is not locked
-      if (adminUser.security.lockedUntil) {
-        await User.updateOne(
-          { _id: adminUser._id },
-          { 
-            $unset: { 'security.lockedUntil': 1 },
-            $set: { 'security.loginAttempts': 0 }
-          }
-        );
-        console.log('🔓 Admin account unlocked');
-      }
+      console.log('✅ Default admin user created');
+      console.log('📧 Email: admin@onlink.local');
+      console.log('🔑 Password: admin123');
     }
 
-    // Verify the password works
-    const updatedUser = await User.findOne({ email: 'admin@onlink.local' });
-    if (updatedUser && updatedUser.password) {
-      const passwordTest = await bcrypt.compare(adminPassword, updatedUser.password);
-      if (passwordTest) {
-        console.log('✅ Admin password verification: PASSED');
-        console.log('📧 Admin credentials: admin@onlink.local / admin123');
-      } else {
-        console.log('❌ Admin password verification: FAILED');
-      }
-    }
-
-    return updatedUser;
-    
-  } catch (error) {
-    console.error('❌ Error creating/fixing admin user:', error);
-    throw error;
-  }
-}
-
-async function seedDefaultData() {
-  console.log('🌱 Seeding default data...');
-  
-  try {
-    const { User, Settings, Domain } = await loadModels();
-    
-    // Create/fix admin user first
-    const adminUser = await createOrFixAdminUser();
-    
-    // Check if settings already exist
+    // Check if settings exist
     const existingSettings = await Settings.findOne();
     if (existingSettings) {
-      console.log('ℹ️  Settings already exist, skipping settings creation...');
+      console.log('ℹ️  Settings already exist, updating with pricing data...');
+      
+      // Update existing settings with pricing data if not present
+      if (!existingSettings.pricing) {
+        existingSettings.pricing = {
+          free: {
+            name: 'Free',
+            description: 'Perfect for personal use',
+            price: { monthly: 0, yearly: 0 },
+            stripePriceIds: { monthly: '', yearly: '' },
+            popular: false
+          },
+          premium: {
+            name: 'Premium',
+            description: 'For professionals and small businesses',
+            price: { monthly: 999, yearly: 9999 },
+            stripePriceIds: { 
+              monthly: 'price_premium_monthly', 
+              yearly: 'price_premium_yearly' 
+            },
+            popular: true,
+            badge: 'Most Popular'
+          },
+          enterprise: {
+            name: 'Enterprise',
+            description: 'For large organizations',
+            price: { monthly: 4999, yearly: 49999 },
+            stripePriceIds: { 
+              monthly: 'price_enterprise_monthly', 
+              yearly: 'price_enterprise_yearly' 
+            },
+            popular: false
+          }
+        };
+        
+        await existingSettings.save();
+        console.log('✅ Settings updated with pricing data');
+      } else {
+        console.log('ℹ️  Pricing data already exists in settings');
+      }
     } else {
-      // Create default settings
+      // Create default settings with pricing data
       await Settings.create({
         system: {
           appName: 'OnLink',
@@ -246,12 +206,13 @@ async function seedDefaultData() {
             fromEmail: 'noreply@onlink.local'
           },
           security: {
-            enforceSSL: false, // Development mode
+            enforceSSL: process.env.NODE_ENV === 'production',
             maxLoginAttempts: 5,
             lockoutDuration: 15,
             sessionTimeout: 24,
             passwordMinLength: 8,
-            requireMFA: false
+            requireEmailVerification: false,
+            enableTwoFactor: false
           },
           analytics: {
             provider: 'internal',
@@ -285,6 +246,36 @@ async function seedDefaultData() {
             analytics: true
           }
         },
+        pricing: {
+          free: {
+            name: 'Free',
+            description: 'Perfect for personal use',
+            price: { monthly: 0, yearly: 0 },
+            stripePriceIds: { monthly: '', yearly: '' },
+            popular: false
+          },
+          premium: {
+            name: 'Premium',
+            description: 'For professionals and small businesses',
+            price: { monthly: 999, yearly: 9999 }, // $9.99/month, $99.99/year
+            stripePriceIds: { 
+              monthly: 'price_premium_monthly', 
+              yearly: 'price_premium_yearly' 
+            },
+            popular: true,
+            badge: 'Most Popular'
+          },
+          enterprise: {
+            name: 'Enterprise',
+            description: 'For large organizations',
+            price: { monthly: 4999, yearly: 49999 }, // $49.99/month, $499.99/year
+            stripePriceIds: { 
+              monthly: 'price_enterprise_monthly', 
+              yearly: 'price_enterprise_yearly' 
+            },
+            popular: false
+          }
+        },
         features: {
           enableSignup: true,
           enableTeams: true,
@@ -298,7 +289,7 @@ async function seedDefaultData() {
         lastModifiedBy: adminUser._id
       });
 
-      console.log('✅ Default settings created');
+      console.log('✅ Default settings created with pricing data');
     }
 
     // Check if default domain exists
@@ -349,6 +340,79 @@ async function seedDefaultData() {
   }
 }
 
+async function updateExistingData() {
+  console.log('🔄 Updating existing data...');
+  
+  try {
+    const { User, Settings } = await loadModels();
+    
+    // Update users without proper subscription status
+    const usersWithoutSubscriptionStatus = await User.find({
+      'subscription.status': { $exists: false }
+    });
+    
+    if (usersWithoutSubscriptionStatus.length > 0) {
+      console.log(`🔄 Updating ${usersWithoutSubscriptionStatus.length} users with subscription status...`);
+      
+      for (const user of usersWithoutSubscriptionStatus) {
+        user.subscription = {
+          ...user.subscription,
+          status: 'active' // Free plan users are active by default
+        };
+        await user.save();
+      }
+      
+      console.log('✅ User subscription status updated');
+    }
+    
+    // Update settings with pricing data if missing
+    const settings = await Settings.findOne();
+    if (settings && !settings.pricing) {
+      console.log('🔄 Adding pricing data to existing settings...');
+      
+      settings.pricing = {
+        free: {
+          name: 'Free',
+          description: 'Perfect for personal use',
+          price: { monthly: 0, yearly: 0 },
+          stripePriceIds: { monthly: '', yearly: '' },
+          popular: false
+        },
+        premium: {
+          name: 'Premium',
+          description: 'For professionals and small businesses',
+          price: { monthly: 999, yearly: 9999 },
+          stripePriceIds: { 
+            monthly: 'price_premium_monthly', 
+            yearly: 'price_premium_yearly' 
+          },
+          popular: true,
+          badge: 'Most Popular'
+        },
+        enterprise: {
+          name: 'Enterprise',
+          description: 'For large organizations',
+          price: { monthly: 4999, yearly: 49999 },
+          stripePriceIds: { 
+            monthly: 'price_enterprise_monthly', 
+            yearly: 'price_enterprise_yearly' 
+          },
+          popular: false
+        }
+      };
+      
+      await settings.save();
+      console.log('✅ Pricing data added to settings');
+    }
+    
+    console.log('🎉 Data update completed!');
+    
+  } catch (error) {
+    console.error('❌ Error updating existing data:', error);
+    throw error;
+  }
+}
+
 async function migrate() {
   try {
     console.log('🚀 Starting database migration...');
@@ -364,26 +428,68 @@ async function migrate() {
     // Create indexes
     await createIndexes();
     
-    // Seed default data (includes admin user fix)
+    // Seed default data (includes admin user and settings with pricing)
     await seedDefaultData();
     
+    // Update existing data
+    await updateExistingData();
+    
     console.log('🎉 Database migration completed successfully!');
-    console.log('📧 Use these credentials to login:');
-    console.log('   Email: admin@onlink.local');
-    console.log('   Password: admin123');
+    console.log('');
+    console.log('📋 Summary:');
+    console.log('  ✅ Database indexes created');
+    console.log('  ✅ Default admin user created/verified');
+    console.log('  ✅ Settings with pricing data initialized');
+    console.log('  ✅ Default domain configured');
+    console.log('  ✅ Existing data updated');
+    console.log('');
+    console.log('🔐 Admin Login:');
+    console.log('  📧 Email: admin@onlink.local');
+    console.log('  🔑 Password: admin123');
+    console.log('');
+    console.log('💰 Pricing Configuration:');
+    console.log('  🆓 Free: $0/month - 5 links, 1K clicks');
+    console.log('  ⭐ Premium: $9.99/month - Unlimited links & clicks');
+    console.log('  🚀 Enterprise: $49.99/month - All features');
+    console.log('');
+    console.log('🔧 Next Steps:');
+    console.log('  1. Update Stripe price IDs in admin settings');
+    console.log('  2. Configure SMTP settings for emails');
+    console.log('  3. Set up custom domain if needed');
+    console.log('  4. Review and adjust pricing/limits as needed');
     
   } catch (error) {
     console.error('❌ Migration failed:', error);
-    process.exit(1);
+    throw error;
   } finally {
-    await mongoose.disconnect();
-    console.log('💾 Database connection closed');
+    // Close the connection
+    await mongoose.connection.close();
+    console.log('📡 Database connection closed');
   }
 }
 
-// Run migration if called directly
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+// Run migration
 if (require.main === module) {
-  migrate();
+  migrate()
+    .then(() => {
+      console.log('🎉 Migration completed successfully!');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('❌ Migration failed:', error);
+      process.exit(1);
+    });
 }
 
-export { migrate, createIndexes, seedDefaultData, createOrFixAdminUser };
+export default migrate;

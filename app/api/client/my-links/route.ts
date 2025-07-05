@@ -7,6 +7,7 @@ import { User } from '@/models/User';
 import { URL } from '@/models/URL';
 import { Folder } from '@/models/Folder';
 import { z } from 'zod';
+import { Analytics } from '@/models/Analytics';
 
 export async function GET(req: NextRequest) {
   try {
@@ -251,6 +252,7 @@ export async function PUT(req: NextRequest) {
 }
 
 // Delete URL
+
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -260,7 +262,6 @@ export async function DELETE(req: NextRequest) {
 
     await connectDB();
 
-    // Use Next.js 15 pattern for searchParams
     const urlId = req.nextUrl.searchParams.get('urlId');
 
     if (!urlId) {
@@ -277,23 +278,28 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'URL not found' }, { status: 404 });
     }
 
-    // Store folder ID for stats update
     const folderId = url.folderId;
 
-    // Soft delete
-    await URL.findByIdAndUpdate(urlId, {
-      isDeleted: true,
-      deletedAt: new Date(),
-      isActive: false
-    });
+    console.log('🗑️ HARD DELETE: Permanently removing URL from database:', url.shortCode);
 
-    // Update user usage
+    // STEP 1: Delete all associated analytics data first
+    const analyticsDeleted = await Analytics.deleteMany({ shortCode: url.shortCode });
+    console.log(`✅ Deleted ${analyticsDeleted.deletedCount} analytics records for: ${url.shortCode}`);
+
+    // STEP 2: Delete any QR codes or other related data
+    // (Add any other related collections here)
+
+    // STEP 3: FIXED - Actually delete the URL from database
+    await URL.findByIdAndDelete(urlId);
+    console.log('✅ URL PERMANENTLY DELETED from database:', url.shortCode);
+
+    // STEP 4: Update user usage stats
     await User.findByIdAndUpdate(session.user.id, {
       $inc: { 'usage.linksCount': -1 },
       'usage.lastUpdated': new Date()
     });
 
-    // Update folder stats if URL was in a folder
+    // STEP 5: Update folder stats if URL was in a folder
     if (folderId) {
       await Folder.findByIdAndUpdate(folderId, {
         $inc: { 'stats.urlCount': -1 },
@@ -303,7 +309,7 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'URL deleted successfully'
+      message: 'URL permanently deleted from database'
     });
 
   } catch (error) {

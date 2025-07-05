@@ -316,35 +316,41 @@ export function useBilling() {
     }
   }, [user, fetchSubscription, fetchInvoices, fetchPaymentMethods]);
 
-  return {
-    // Data
-    subscription,
-    invoices,
-    paymentMethods,
-    currentPlan: currentPlan(),
-    isLoading,
-    error,
-    
-    // Actions
-    createSubscription,
-    updateSubscription,
-    cancelSubscription,
-    openBillingPortal,
-    downloadInvoice,
-    
-    // Utilities
-    canUpgrade: canUpgrade(),
-    canDowngrade: canDowngrade(),
-    refresh: () => {
-      fetchSubscription();
-      fetchInvoices();
-      fetchPaymentMethods();
-    },
-    
-    // Subscription status helpers
-    isActive: subscription?.status === 'active',
-    isTrialing: subscription?.status === 'trialing',
-    isCanceled: subscription?.status === 'canceled',
-    isPastDue: subscription?.status === 'past_due'
-  };
+return {
+  // Data
+  subscription,
+  invoices,
+  paymentMethods,
+  currentPlan: currentPlan(),
+  isLoading,
+  error,
+  
+  // Actions
+  createSubscription,
+  updateSubscription,
+  cancelSubscription,
+  openBillingPortal,
+  downloadInvoice,
+  
+  // Utilities
+  canUpgrade: canUpgrade(),
+  canDowngrade: canDowngrade(),
+  refresh: () => {
+    fetchSubscription();
+    fetchInvoices();
+    fetchPaymentMethods();
+  },
+  
+  // Subscription status helpers - Updated to handle free plan
+  isActive: user?.plan === 'free' ? true : subscription?.status === 'active',
+  isTrialing: subscription?.status === 'trialing',
+  isCanceled: subscription?.status === 'canceled',
+  isPastDue: subscription?.status === 'past_due',
+  
+  // Free plan helper
+  isFree: user?.plan === 'free',
+  
+  // Overall account status
+  isAccountActive: user?.plan === 'free' ? true : subscription?.status === 'active'
+};
 }

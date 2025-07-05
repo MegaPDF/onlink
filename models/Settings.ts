@@ -1,3 +1,4 @@
+// models/Settings.ts - Complete Settings Model
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ISettings extends Document {
@@ -10,13 +11,13 @@ export interface ISettings extends Document {
     supportEmail: string;
     
     smtp: {
-      host?: string;
+      host: string;
       port: number;
       secure: boolean;
-      username?: string;
-      password?: string;
+      username: string;
+      password: string;
       fromName: string;
-      fromEmail?: string;
+      fromEmail: string;
     };
     
     security: {
@@ -29,29 +30,9 @@ export interface ISettings extends Document {
       enableTwoFactor: boolean;
     };
     
-    rateLimiting: {
-      enabled: boolean;
-      windowMs: number;
-      maxRequests: number;
-      skipSuccessfulRequests: boolean;
-    };
-    
-    uploads: {
-      maxFileSize: number;
-      allowedImageTypes: string[];
-      allowedDocumentTypes: string[];
-      storageProvider: 'local' | 's3' | 'cloudinary';
-      s3Config?: {
-        bucket: string;
-        region: string;
-        accessKeyId: string;
-        secretAccessKey: string;
-      };
-    };
-    
     analytics: {
-      enableGoogleAnalytics: boolean;
-      googleAnalyticsId?: string;
+      provider: string;
+      trackingCode: string;
       enableCustomAnalytics: boolean;
       retentionDays: number;
     };
@@ -97,6 +78,33 @@ export interface ISettings extends Document {
     };
   };
   
+  pricing: {
+    free: {
+      name: string;
+      description: string;
+      price: { monthly: number; yearly: number };
+      stripePriceIds: { monthly: string; yearly: string };
+      popular?: boolean;
+      badge?: string;
+    };
+    premium: {
+      name: string;
+      description: string;
+      price: { monthly: number; yearly: number };
+      stripePriceIds: { monthly: string; yearly: string };
+      popular?: boolean;
+      badge?: string;
+    };
+    enterprise: {
+      name: string;
+      description: string;
+      price: { monthly: number; yearly: number };
+      stripePriceIds: { monthly: string; yearly: string };
+      popular?: boolean;
+      badge?: string;
+    };
+  };
+  
   features: {
     enableSignup: boolean;
     enableTeams: boolean;
@@ -110,59 +118,39 @@ export interface ISettings extends Document {
   
   createdAt: Date;
   updatedAt: Date;
-  lastModifiedBy: mongoose.Types.ObjectId;
+  lastModifiedBy: string;
 }
 
 const SettingsSchema = new Schema<ISettings>({
   system: {
-    appName: { type: String, default: 'URL Shortener' },
-    appDescription: { type: String, default: 'Professional URL shortening service' },
-    appUrl: { type: String, default: 'http://localhost:3000' },
-    supportEmail: { type: String, default: 'support@example.com' },
+    appName: { type: String, required: true, default: 'OnLink' },
+    appDescription: { type: String, required: true, default: 'Professional URL shortening service' },
+    appUrl: { type: String, required: true, default: 'http://localhost:3000' },
+    supportEmail: { type: String, required: true, default: 'support@onlink.local' },
     
     smtp: {
-      host: { type: String },
+      host: { type: String, default: '' },
       port: { type: Number, default: 587 },
       secure: { type: Boolean, default: false },
-      username: { type: String },
-      password: { type: String, select: false },
-      fromName: { type: String, default: 'URL Shortener' },
-      fromEmail: { type: String }
+      username: { type: String, default: '' },
+      password: { type: String, default: '' },
+      fromName: { type: String, default: 'OnLink' },
+      fromEmail: { type: String, default: 'noreply@onlink.local' }
     },
     
     security: {
-      enforceSSL: { type: Boolean, default: true },
+      enforceSSL: { type: Boolean, default: false },
       maxLoginAttempts: { type: Number, default: 5 },
       lockoutDuration: { type: Number, default: 15 },
-      sessionTimeout: { type: Number, default: 1440 },
+      sessionTimeout: { type: Number, default: 24 },
       passwordMinLength: { type: Number, default: 8 },
-      requireEmailVerification: { type: Boolean, default: true },
+      requireEmailVerification: { type: Boolean, default: false },
       enableTwoFactor: { type: Boolean, default: false }
     },
     
-    rateLimiting: {
-      enabled: { type: Boolean, default: true },
-      windowMs: { type: Number, default: 900000 },
-      maxRequests: { type: Number, default: 100 },
-      skipSuccessfulRequests: { type: Boolean, default: false }
-    },
-    
-    uploads: {
-      maxFileSize: { type: Number, default: 5242880 },
-      allowedImageTypes: [{ type: String, default: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }],
-      allowedDocumentTypes: [{ type: String, default: ['pdf', 'doc', 'docx'] }],
-      storageProvider: { type: String, enum: ['local', 's3', 'cloudinary'], default: 'local' },
-      s3Config: {
-        bucket: { type: String },
-        region: { type: String },
-        accessKeyId: { type: String },
-        secretAccessKey: { type: String, select: false }
-      }
-    },
-    
     analytics: {
-      enableGoogleAnalytics: { type: Boolean, default: false },
-      googleAnalyticsId: { type: String },
+      provider: { type: String, default: 'internal' },
+      trackingCode: { type: String, default: '' },
       enableCustomAnalytics: { type: Boolean, default: true },
       retentionDays: { type: Number, default: 365 }
     },
@@ -170,19 +158,19 @@ const SettingsSchema = new Schema<ISettings>({
     integrations: {
       stripe: {
         enabled: { type: Boolean, default: false },
-        publicKey: { type: String },
-        secretKey: { type: String, select: false },
-        webhookSecret: { type: String, select: false }
+        publicKey: { type: String, default: '' },
+        secretKey: { type: String, default: '', select: false },
+        webhookSecret: { type: String, default: '', select: false }
       },
       google: {
         enabled: { type: Boolean, default: false },
-        clientId: { type: String },
-        clientSecret: { type: String, select: false }
+        clientId: { type: String, default: '' },
+        clientSecret: { type: String, default: '', select: false }
       },
       facebook: {
         enabled: { type: Boolean, default: false },
-        appId: { type: String },
-        appSecret: { type: String, select: false }
+        appId: { type: String, default: '' },
+        appSecret: { type: String, default: '', select: false }
       }
     }
   },
@@ -208,6 +196,51 @@ const SettingsSchema = new Schema<ISettings>({
     }
   },
   
+  pricing: {
+    free: {
+      name: { type: String, default: 'Free' },
+      description: { type: String, default: 'Perfect for personal use' },
+      price: {
+        monthly: { type: Number, default: 0 },
+        yearly: { type: Number, default: 0 }
+      },
+      stripePriceIds: {
+        monthly: { type: String, default: '' },
+        yearly: { type: String, default: '' }
+      },
+      popular: { type: Boolean, default: false },
+      badge: { type: String }
+    },
+    premium: {
+      name: { type: String, default: 'Premium' },
+      description: { type: String, default: 'For professionals and small businesses' },
+      price: {
+        monthly: { type: Number, default: 999 },
+        yearly: { type: Number, default: 9999 }
+      },
+      stripePriceIds: {
+        monthly: { type: String, default: 'price_premium_monthly' },
+        yearly: { type: String, default: 'price_premium_yearly' }
+      },
+      popular: { type: Boolean, default: true },
+      badge: { type: String, default: 'Most Popular' }
+    },
+    enterprise: {
+      name: { type: String, default: 'Enterprise' },
+      description: { type: String, default: 'For large organizations' },
+      price: {
+        monthly: { type: Number, default: 4999 },
+        yearly: { type: Number, default: 49999 }
+      },
+      stripePriceIds: {
+        monthly: { type: String, default: 'price_enterprise_monthly' },
+        yearly: { type: String, default: 'price_enterprise_yearly' }
+      },
+      popular: { type: Boolean, default: false },
+      badge: { type: String }
+    }
+  },
+  
   features: {
     enableSignup: { type: Boolean, default: true },
     enableTeams: { type: Boolean, default: true },
@@ -219,11 +252,7 @@ const SettingsSchema = new Schema<ISettings>({
     maintenanceMode: { type: Boolean, default: false }
   },
   
-  lastModifiedBy: { 
-    type: Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true 
-  }
+  lastModifiedBy: { type: String, required: true }
 }, {
   timestamps: true
 });

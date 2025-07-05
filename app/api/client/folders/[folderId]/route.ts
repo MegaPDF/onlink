@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
@@ -10,7 +9,7 @@ import { Folder } from '@/models/Folder';
 // Get individual folder
 export async function GET(
   req: NextRequest,
-  { params }: { params: { folderId: string } }
+  { params }: { params: Promise<{ folderId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions);
@@ -20,7 +19,8 @@ export async function GET(
 
     await connectDB();
 
-    const { folderId } = params;
+    // FIXED: Await params before using its properties
+    const { folderId } = await params;
 
     const folder = await Folder.findOne({
       _id: folderId,
@@ -51,7 +51,7 @@ export async function GET(
     ]);
 
     const folderWithStats = {
-      ...folder,
+      ...folder.toObject(),
       stats: {
         urlCount: stats[0]?.urlCount || 0,
         totalClicks: stats[0]?.totalClicks || 0,
@@ -73,7 +73,7 @@ export async function GET(
 // Update individual folder
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { folderId: string } }
+  { params }: { params: Promise<{ folderId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions);
@@ -83,7 +83,8 @@ export async function PATCH(
 
     await connectDB();
 
-    const { folderId } = params;
+    // FIXED: Await params before using its properties
+    const { folderId } = await params;
     const updates = await req.json();
 
     const folder = await Folder.findOne({
@@ -141,9 +142,10 @@ export async function PATCH(
 }
 
 // Delete individual folder
+
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { folderId: string } }
+  { params }: { params: Promise<{ folderId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions);
@@ -153,8 +155,8 @@ export async function DELETE(
 
     await connectDB();
 
-    const { folderId } = params;
-    const moveToFolder = req.nextUrl.searchParams.get('moveToFolder'); // Optional: move URLs to another folder
+    const { folderId } = await params;
+    const moveToFolder = req.nextUrl.searchParams.get('moveToFolder');
 
     const folder = await Folder.findOne({
       _id: folderId,
@@ -166,40 +168,35 @@ export async function DELETE(
       return NextResponse.json({ error: 'Folder not found' }, { status: 404 });
     }
 
-    // Check if folder has URLs
-    const urlCount = await URL.countDocuments({
-      folderId,
-      isDeleted: false
-    });
+    console.log('🗑️ HARD DELETE: Permanently removing folder from database:', folder.name);
 
-    if (urlCount > 0) {
-      if (moveToFolder && moveToFolder !== 'null') {
-        // Move URLs to specified folder
-        await URL.updateMany(
-          { folderId, isDeleted: false },
-          { folderId: moveToFolder }
-        );
-      } else {
-        // Move URLs to root (no folder)
-        await URL.updateMany(
-          { folderId, isDeleted: false },
-          { $unset: { folderId: 1 } }
-        );
-      }
+    // Handle URLs in this folder
+    if (moveToFolder && moveToFolder !== 'null') {
+      // Move URLs to another specific folder
+      await URL.updateMany(
+        { folderId, isDeleted: false },
+        { folderId: moveToFolder }
+      );
+      console.log(`✅ Moved URLs to folder: ${moveToFolder}`);
+    } else {
+      // Move URLs to root (uncategorized)
+      await URL.updateMany(
+        { folderId, isDeleted: false },
+        { $unset: { folderId: 1 } }
+      );
+      console.log('✅ Moved URLs to uncategorized');
     }
 
-    // Delete child folders recursively
-    await deleteChildFolders(folderId, session.user.id);
+    // Delete child folders recursively (HARD DELETE)
+    await hardDeleteChildFolders(folderId, session.user.id);
 
-    // Soft delete the folder
-    await Folder.findByIdAndUpdate(folderId, {
-      isDeleted: true,
-      deletedAt: new Date()
-    });
+    // FIXED: Actually delete the folder from database (not just mark as deleted)
+    await Folder.findByIdAndDelete(folderId);
+    console.log('✅ Folder PERMANENTLY DELETED from database:', folder.name);
 
     return NextResponse.json({
       success: true,
-      message: 'Folder deleted successfully'
+      message: 'Folder permanently deleted from database'
     });
 
   } catch (error) {
@@ -208,27 +205,30 @@ export async function DELETE(
   }
 }
 
-async function deleteChildFolders(parentId: string, userId: string) {
+// Helper function for hard deleting child folders
+async function hardDeleteChildFolders(parentId: string, userId: string) {
   const childFolders = await Folder.find({
     parentId,
     userId,
     isDeleted: false
   });
 
+  console.log(`Found ${childFolders.length} child folders to delete`);
+
   for (const child of childFolders) {
-    // Recursively delete children
-    await deleteChildFolders(child._id.toString(), userId);
+    console.log(`🗑️ Deleting child folder: ${child.name}`);
     
-    // Move URLs to root
+    // Recursively delete grandchildren
+    await hardDeleteChildFolders(child._id.toString(), userId);
+    
+    // Move URLs in this child folder to uncategorized
     await URL.updateMany(
       { folderId: child._id, isDeleted: false },
       { $unset: { folderId: 1 } }
     );
     
-    // Delete folder
-    await Folder.findByIdAndUpdate(child._id, {
-      isDeleted: true,
-      deletedAt: new Date()
-    });
+    // FIXED: Actually delete child folder from database
+    await Folder.findByIdAndDelete(child._id);
+    console.log(`✅ Child folder PERMANENTLY DELETED: ${child.name}`);
   }
 }

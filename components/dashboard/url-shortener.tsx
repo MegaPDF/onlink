@@ -1,7 +1,6 @@
-// ============= components/dashboard/url-shortener.tsx =============
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -39,6 +38,7 @@ import {
   Crown,
   Eye,
   EyeOff,
+  Folder,
 } from "lucide-react";
 
 const urlSchema = z.object({
@@ -58,10 +58,15 @@ type UrlFormData = z.infer<typeof urlSchema>;
 
 interface UrlShortenerProps {
   folders?: Array<{ id: string; name: string; color?: string }>;
+  defaultFolderId?: string; // NEW: Default folder to select
   onSuccess?: (data: any) => void;
 }
 
-export function UrlShortener({ folders = [], onSuccess }: UrlShortenerProps) {
+export function UrlShortener({
+  folders = [],
+  defaultFolderId = "",
+  onSuccess,
+}: UrlShortenerProps) {
   const { user } = useAuth();
   const toast = useToast();
   const [isLoading, setIsLoading] = useState(false);
@@ -72,48 +77,59 @@ export function UrlShortener({ folders = [], onSuccess }: UrlShortenerProps) {
     resolver: zodResolver(urlSchema),
     defaultValues: {
       isPasswordProtected: false,
+      folderId: defaultFolderId, // Set default folder
     },
   });
+
+  // Update folder selection when defaultFolderId changes
+  useEffect(() => {
+    if (defaultFolderId !== undefined) {
+      form.setValue("folderId", defaultFolderId);
+    }
+  }, [defaultFolderId, form]);
 
   const handleSubmit = async (data: UrlFormData) => {
     setIsLoading(true);
 
     try {
+      console.log("🚀 Creating link with data:", data); // Debug log
+
       const payload = {
         ...data,
         tags: data.tags ? data.tags.split(",").map((tag) => tag.trim()) : [],
         clickLimit: data.clickLimit ? Number(data.clickLimit) : undefined,
+        expiresAt: data.expiresAt || undefined,
+        folderId: data.folderId || undefined, // Ensure empty string becomes undefined
       };
+
+      console.log("📤 Sending payload:", payload); // Debug log
 
       const response = await fetch("/api/client/shorten", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
 
       const result = await response.json();
+      console.log("📡 API Response:", response.status, result); // Debug log
 
-      if (!response.ok) {
-        if (result.upgradeRequired) {
-          toast.error(result.error, {
-            action: {
-              label: "Upgrade",
-              onClick: () => (window.location.href = "/dashboard/billing"),
-            },
-          });
-          return;
-        }
-        throw new Error(result.error);
+      if (response.ok) {
+        setShortenedUrl(result.data);
+        form.reset({
+          isPasswordProtected: false,
+          folderId: defaultFolderId, // Reset to default folder
+        });
+        toast.success("Link created successfully!");
+        onSuccess?.(result.data);
+      } else {
+        console.error("❌ API Error:", result);
+        toast.error(result.error || "Failed to create link");
       }
-
-      setShortenedUrl(result.data);
-      form.reset();
-      toast.success("URL shortened successfully!");
-      onSuccess?.(result.data);
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to shorten URL"
-      );
+      console.error("💥 Network Error:", error);
+      toast.error("Failed to create link. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -121,255 +137,260 @@ export function UrlShortener({ folders = [], onSuccess }: UrlShortenerProps) {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    toast.copySuccess();
+    toast.success("Copied to clipboard!");
   };
 
-  const downloadQRCode = () => {
-    if (shortenedUrl?.qrCode?.url) {
-      const link = document.createElement("a");
-      link.href = shortenedUrl.qrCode.url;
-      link.download = `qr-${shortenedUrl.shortCode}.png`;
-      link.click();
-    }
+  const generateQRCode = () => {
+    if (!shortenedUrl) return;
+    // TODO: Implement QR code generation
+    toast.info("QR Code generation coming soon!");
   };
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Link className="h-5 w-5" />
-            Shorten URL
-          </CardTitle>
-          <CardDescription>
-            Create a short link with optional custom settings
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-4"
-          >
-            {/* URL Input */}
-            <div className="space-y-2">
-              <Label htmlFor="originalUrl">Enter your long URL *</Label>
-              <Input
-                id="originalUrl"
-                placeholder="https://example.com/very-long-url"
-                {...form.register("originalUrl")}
-                className="text-lg"
-              />
-              {form.formState.errors.originalUrl && (
-                <p className="text-sm text-red-600">
-                  {form.formState.errors.originalUrl.message}
-                </p>
-              )}
-            </div>
+      {/* Debug Info */}
+      <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
+        <strong>Debug:</strong> defaultFolderId = "{defaultFolderId}", folders
+        count = {folders.length}
+      </div>
 
-            {/* Basic Options */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="customSlug">Custom Slug (Optional)</Label>
-                <Input
-                  id="customSlug"
-                  placeholder="my-custom-link"
-                  {...form.register("customSlug")}
-                />
-                {user?.plan === "free" && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Crown className="h-3 w-3" />
-                    Custom slugs available in Premium
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="folderId">Folder (Optional)</Label>
-                <Select
-                  onValueChange={(value) => form.setValue("folderId", value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select folder" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {folders.map((folder) => (
-                      <SelectItem key={folder.id} value={folder.id}>
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{
-                              backgroundColor: folder.color || "#3B82F6",
-                            }}
-                          />
-                          {folder.name}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Advanced Options Toggle */}
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="advanced"
-                checked={showAdvanced}
-                onCheckedChange={setShowAdvanced}
-              />
-              <Label htmlFor="advanced">Advanced Options</Label>
-            </div>
-
-            {/* Advanced Options */}
-            {showAdvanced && (
-              <Tabs defaultValue="metadata" className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="metadata">Metadata</TabsTrigger>
-                  <TabsTrigger value="access">Access Control</TabsTrigger>
-                  <TabsTrigger value="tracking">Tracking</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="metadata" className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="title">Title</Label>
-                    <Input
-                      id="title"
-                      placeholder="My Awesome Link"
-                      {...form.register("title")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="description">Description</Label>
-                    <Textarea
-                      id="description"
-                      placeholder="Brief description of this link"
-                      {...form.register("description")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="tags">Tags (comma-separated)</Label>
-                    <Input
-                      id="tags"
-                      placeholder="marketing, campaign, social"
-                      {...form.register("tags")}
-                    />
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="access" className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="expiresAt">Expiration Date</Label>
-                    <Input
-                      id="expiresAt"
-                      type="datetime-local"
-                      {...form.register("expiresAt")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="clickLimit">Click Limit</Label>
-                    <Input
-                      id="clickLimit"
-                      type="number"
-                      placeholder="100"
-                      {...form.register("clickLimit", { valueAsNumber: true })}
-                    />
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="password-protected"
-                      {...form.register("isPasswordProtected")}
-                    />
-                    <Label htmlFor="password-protected">
-                      Password Protection
-                    </Label>
-                  </div>
-                  {form.watch("isPasswordProtected") && (
-                    <div className="space-y-2">
-                      <Label htmlFor="password">Password</Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="Enter password"
-                        {...form.register("password")}
-                      />
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="tracking" className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    UTM parameters and advanced tracking options will be
-                    available in the next update.
-                  </p>
-                </TabsContent>
-              </Tabs>
-            )}
-
-            <Button type="submit" disabled={isLoading} className="w-full">
-              {isLoading ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Shortening...
-                </div>
-              ) : (
-                <>
-                  <Zap className="mr-2 h-4 w-4" />
-                  Shorten URL
-                </>
-              )}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      {/* Result Card */}
+      {/* Show success result */}
       {shortenedUrl && (
-        <Card className="border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
+        <Card className="border-green-200 bg-green-50">
           <CardHeader>
-            <CardTitle className="text-green-800 dark:text-green-200">
-              URL Shortened Successfully!
+            <CardTitle className="text-green-800 flex items-center gap-2">
+              <Link className="h-5 w-5" />
+              Link Created Successfully!
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-2 p-3 bg-white dark:bg-gray-900 rounded-lg border">
-              <Link className="h-4 w-4 text-green-600" />
-              <span className="flex-1 font-mono text-sm">
-                {shortenedUrl.shortUrl}
-              </span>
+            <div className="flex items-center gap-2">
+              <Input
+                value={shortenedUrl.shortUrl}
+                readOnly
+                className="bg-white"
+              />
               <Button
                 size="sm"
-                variant="outline"
                 onClick={() => copyToClipboard(shortenedUrl.shortUrl)}
               >
-                <Copy className="h-3 w-3" />
+                <Copy className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="outline" onClick={generateQRCode}>
+                <QrCode className="h-4 w-4" />
               </Button>
             </div>
-
-            {shortenedUrl.qrCode && (
-              <div className="flex items-center justify-between p-3 bg-white dark:bg-gray-900 rounded-lg border">
-                <div className="flex items-center gap-3">
-                  <QrCode className="h-4 w-4" />
-                  <span className="text-sm">QR Code generated</span>
+            <div className="text-sm text-green-700">
+              <div>Original: {shortenedUrl.originalUrl}</div>
+              {shortenedUrl.folder && (
+                <div className="flex items-center gap-1 mt-1">
+                  <Folder className="h-3 w-3" />
+                  Folder: {shortenedUrl.folder.name}
                 </div>
-                <Button size="sm" variant="outline" onClick={downloadQRCode}>
-                  Download
-                </Button>
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-2">
-              {shortenedUrl.title && (
-                <Badge variant="secondary">{shortenedUrl.title}</Badge>
               )}
-              {shortenedUrl.tags?.map((tag: string) => (
-                <Badge key={tag} variant="outline">
-                  #{tag}
-                </Badge>
-              ))}
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Form */}
+      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+        {/* Basic Fields */}
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="originalUrl">URL to Shorten *</Label>
+            <Input
+              id="originalUrl"
+              placeholder="https://example.com/very-long-url"
+              {...form.register("originalUrl")}
+              className="mt-1"
+            />
+            {form.formState.errors.originalUrl && (
+              <p className="text-sm text-red-600 mt-1">
+                {form.formState.errors.originalUrl.message}
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="customSlug">Custom Alias (Optional)</Label>
+              <Input
+                id="customSlug"
+                placeholder="my-custom-link"
+                {...form.register("customSlug")}
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Leave empty for auto-generated
+              </p>
+            </div>
+
+            <div>
+              <Label htmlFor="folderId">Folder</Label>
+              <Select
+                value={form.watch("folderId") || ""}
+                onValueChange={(value) =>
+                  form.setValue("folderId", value === "none" ? "" : value)
+                }
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select folder (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-gray-300" />
+                      No Folder (Uncategorized)
+                    </div>
+                  </SelectItem>
+                  {folders.map((folder) => (
+                    <SelectItem key={folder.id} value={folder.id}>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: folder.color || "#3B82F6" }}
+                        />
+                        {folder.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {defaultFolderId && (
+                <p className="text-xs text-blue-600 mt-1">
+                  Pre-selected based on current folder
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Advanced Options Toggle */}
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-2"
+          >
+            <Settings className="h-4 w-4" />
+            {showAdvanced ? "Hide" : "Show"} Advanced Options
+          </Button>
+        </div>
+
+        {/* Advanced Fields */}
+        {showAdvanced && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Advanced Options</CardTitle>
+              <CardDescription>
+                Configure additional settings for your link
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="title">Title</Label>
+                  <Input
+                    id="title"
+                    placeholder="Link title"
+                    {...form.register("title")}
+                    className="mt-1"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="tags">Tags</Label>
+                  <Input
+                    id="tags"
+                    placeholder="marketing, campaign, social"
+                    {...form.register("tags")}
+                    className="mt-1"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Separate with commas
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="description">Description</Label>
+                <Textarea
+                  id="description"
+                  placeholder="Optional description for this link"
+                  {...form.register("description")}
+                  className="mt-1"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="expiresAt">Expires At</Label>
+                  <Input
+                    id="expiresAt"
+                    type="datetime-local"
+                    {...form.register("expiresAt")}
+                    className="mt-1"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="clickLimit">Click Limit</Label>
+                  <Input
+                    id="clickLimit"
+                    type="number"
+                    placeholder="Unlimited"
+                    {...form.register("clickLimit", { valueAsNumber: true })}
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
+              {/* Password Protection */}
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    checked={form.watch("isPasswordProtected")}
+                    onCheckedChange={(checked) =>
+                      form.setValue("isPasswordProtected", checked)
+                    }
+                  />
+                  <Label>Password Protection</Label>
+                </div>
+
+                {form.watch("isPasswordProtected") && (
+                  <div>
+                    <Label htmlFor="password">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Enter password"
+                      {...form.register("password")}
+                      className="mt-1"
+                    />
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Submit Button */}
+        <Button type="submit" disabled={isLoading} className="w-full" size="lg">
+          {isLoading ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+              Creating Link...
+            </>
+          ) : (
+            <>
+              <Zap className="h-4 w-4 mr-2" />
+              Create Short Link
+            </>
+          )}
+        </Button>
+      </form>
     </div>
   );
 }

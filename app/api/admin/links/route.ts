@@ -6,6 +6,7 @@ import { URL as URLModel } from '@/models/URL';
 import { User } from '@/models/User';
 import { Analytics } from '@/models/Analytics';
 import { AuditLog } from '@/models/AuditLog';
+import { Folder } from '@/models/Folder';
 
 export async function GET(req: NextRequest) {
   try {
@@ -198,6 +199,8 @@ export async function PUT(req: NextRequest) {
 }
 
 // Delete link (admin action)
+// Replace the DELETE function in app/api/admin/links/route.ts
+
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -223,29 +226,45 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Link not found' }, { status: 404 });
     }
 
-    // Soft delete link
-    await URLModel.findByIdAndUpdate(linkId, {
-      isDeleted: true,
-      deletedAt: new Date(),
-      isActive: false
+    console.log('🗑️ ADMIN HARD DELETE: Permanently removing link from database:', linkToDelete.shortCode);
+
+    // STEP 1: Delete all associated analytics
+    const analyticsDeleted = await Analytics.deleteMany({ shortCode: linkToDelete.shortCode });
+    console.log(`✅ Deleted ${analyticsDeleted.deletedCount} analytics records for: ${linkToDelete.shortCode}`);
+
+    // STEP 2: Update user's usage stats
+    await User.findByIdAndUpdate(linkToDelete.userId, {
+      $inc: { 'usage.linksCount': -1 },
+      'usage.lastUpdated': new Date()
     });
 
-    // Delete associated analytics
-    await Analytics.deleteMany({ linkId });
+    // STEP 3: Update folder stats if link was in a folder
+    if (linkToDelete.folderId) {
+      await Folder.findByIdAndUpdate(linkToDelete.folderId, {
+        $inc: { 'stats.urlCount': -1 },
+        'stats.lastUpdated': new Date()
+      });
+    }
 
+    // STEP 4: FIXED - Actually delete the link from database
+    await URLModel.findByIdAndDelete(linkId);
+    console.log('✅ Link PERMANENTLY DELETED from database by admin:', linkToDelete.shortCode);
+
+    // STEP 5: Create audit log
     const auditLog = new AuditLog({
       userId: session.user.id,
       userEmail: currentUser.email,
       userName: currentUser.name,
-      action: 'delete_link',
+      action: 'admin_hard_delete_link',
       resource: 'url',
       resourceId: linkId,
       details: {
         method: 'DELETE',
-        changes: [
-          { field: 'isDeleted', oldValue: false, newValue: true },
-          { field: 'isActive', oldValue: linkToDelete.isActive, newValue: false }
-        ]
+        type: 'permanent',
+        shortCode: linkToDelete.shortCode,
+        originalUrl: linkToDelete.originalUrl,
+        linkOwner: linkToDelete.userId,
+        analyticsDeleted: analyticsDeleted.deletedCount
       },
       context: {
         ip: req.headers.get('x-forwarded-for') || '127.0.0.1',
@@ -257,8 +276,8 @@ export async function DELETE(req: NextRequest) {
       },
       risk: {
         level: 'high',
-        factors: ['admin_action', 'data_deletion'],
-        score: 75
+        factors: ['admin_action', 'permanent_deletion'],
+        score: 80
       }
     });
 
@@ -266,7 +285,11 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Link deleted successfully'
+      message: 'Link permanently deleted from database',
+      deletedData: {
+        shortCode: linkToDelete.shortCode,
+        analyticsDeleted: analyticsDeleted.deletedCount
+      }
     });
 
   } catch (error) {

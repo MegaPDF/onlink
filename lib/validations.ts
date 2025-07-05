@@ -163,11 +163,20 @@ export const InviteMemberSchema = z.object({
   }).optional()
 });
 
-
-// Settings validations
-// ============= lib/validations.ts - Complete UpdateSettingsSchema =============
-
-// Settings validations - COMPLETE VERSION
+const PricingPlanSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500),
+  price: z.object({
+    monthly: z.number().min(0),
+    yearly: z.number().min(0)
+  }),
+  stripePriceIds: z.object({
+    monthly: z.string(),
+    yearly: z.string()
+  }),
+  popular: z.boolean().optional(),
+  badge: z.string().max(50).optional()
+});
 export const UpdateSettingsSchema = z.object({
   system: z.object({
     appName: z.string().min(1).max(100).optional(),
@@ -188,20 +197,20 @@ export const UpdateSettingsSchema = z.object({
     security: z.object({
       enforceSSL: z.boolean().optional(),
       maxLoginAttempts: z.number().min(1).max(10).optional(),
-      lockoutDuration: z.number().min(1).max(1440).optional(),
-      sessionTimeout: z.number().min(1).max(10080).optional(),
-      passwordMinLength: z.number().min(4).max(32).optional(),
+      lockoutDuration: z.number().min(1).max(60).optional(),
+      sessionTimeout: z.number().min(1).max(168).optional(),
+      passwordMinLength: z.number().min(4).max(128).optional(),
       requireEmailVerification: z.boolean().optional(),
       enableTwoFactor: z.boolean().optional()
     }).optional(),
-
+    
     analytics: z.object({
       provider: z.string().optional(),
       trackingCode: z.string().optional(),
       enableCustomAnalytics: z.boolean().optional(),
-      retentionDays: z.number().min(1).max(3650).optional()
+      retentionDays: z.number().min(1).max(365).optional()
     }).optional(),
-
+    
     integrations: z.object({
       stripe: z.object({
         enabled: z.boolean().optional(),
@@ -221,7 +230,7 @@ export const UpdateSettingsSchema = z.object({
       }).optional()
     }).optional()
   }).optional(),
-  
+
   features: z.object({
     enableSignup: z.boolean().optional(),
     enableTeams: z.boolean().optional(),
@@ -254,13 +263,20 @@ export const UpdateSettingsSchema = z.object({
     }).optional()
   }).optional(),
 
+  // Add the pricing validation here
+  pricing: z.object({
+    free: PricingPlanSchema.optional(),
+    premium: PricingPlanSchema.optional(),
+    enterprise: PricingPlanSchema.optional()
+  }).optional(),
+
   // Meta fields
   lastModifiedBy: z.string().optional(),
   _id: z.string().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
   __v: z.number().optional()
-}).strict(); // Allow additional fields for flexibility
+});
 
 // User profile validations
 export const UpdateProfileSchema = z.object({

@@ -12,6 +12,8 @@ import { EmailService } from '@/lib/email';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { generateSecureToken } from '@/lib/utils';
+import { Analytics } from '@/models/Analytics';
+import { Folder } from '@/models/Folder';
 
 // Validation schemas
 const createUserSchema = z.object({
@@ -458,6 +460,7 @@ export async function PUT(req: NextRequest) {
 }
 
 // Delete user (admin action)
+
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -473,6 +476,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     const userId = req.nextUrl.searchParams.get('userId');
+    
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
@@ -487,47 +491,62 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Soft delete user
-    await User.findByIdAndUpdate(userId, {
-      isDeleted: true,
-      deletedAt: new Date(),
-      deletedBy: session.user.id,
-      isActive: false
+    console.log('🗑️ HARD DELETE: Permanently removing user and all data:', userToDelete.email);
+
+    // STEP 1: Get all user's URLs for analytics cleanup
+    const userUrls = await URLModel.find({ userId });
+    console.log(`Found ${userUrls.length} URLs belonging to user`);
+
+    // STEP 2: Delete all analytics for user's URLs
+    let analyticsDeleted = 0;
+    for (const url of userUrls) {
+      const result = await Analytics.deleteMany({ shortCode: url.shortCode });
+      analyticsDeleted += result.deletedCount;
+    }
+    console.log(`✅ Deleted ${analyticsDeleted} analytics records`);
+
+    // STEP 3: Delete all user's URLs
+    const urlsDeleted = await URLModel.deleteMany({ userId });
+    console.log(`✅ Deleted ${urlsDeleted.deletedCount} URLs`);
+
+    // STEP 4: Delete all user's folders
+    const foldersDeleted = await Folder.deleteMany({ userId });
+    console.log(`✅ Deleted ${foldersDeleted.deletedCount} folders`);
+
+    // STEP 5: Delete user's sessions (if you have a Session model)
+    
+
+    // STEP 6: Delete audit logs related to this user (optional - you might want to keep for legal reasons)
+    const auditLogsDeleted = await AuditLog.deleteMany({ 
+      $or: [
+        { userId },
+        { resourceId: userId }
+      ]
     });
+    console.log(`✅ Deleted ${auditLogsDeleted.deletedCount} audit logs`);
 
-    // Soft delete user's URLs
-    await URLModel.updateMany(
-      { userId, isDeleted: false },
-      { 
-        isDeleted: true, 
-        deletedAt: new Date(),
-        deletedBy: session.user.id
-      }
-    );
+    // STEP 7: FIXED - Actually delete the user from database
+    await User.findByIdAndDelete(userId);
+    console.log('✅ User PERMANENTLY DELETED from database:', userToDelete.email);
 
-    // Log deletion
-    await SecurityService.logSecurityEvent(
-      session.user.id,
-      'delete_user',
-      {
-        ip: req.headers.get('x-forwarded-for') || '127.0.0.1',
-        userAgent: req.headers.get('user-agent') || ''
-      },
-      { success: true }
-    );
-
+    // STEP 8: Create final audit log (before user deletion)
     const auditLog = new AuditLog({
       userId: session.user.id,
       userEmail: currentUser.email,
       userName: currentUser.name,
-      action: 'delete_user',
+      action: 'hard_delete_user',
       resource: 'user',
       resourceId: userId,
       details: {
         method: 'DELETE',
-        metadata: {
-          deletedUserEmail: userToDelete.email,
-          deletedUserName: userToDelete.name
+        type: 'permanent',
+        userEmail: userToDelete.email,
+        userName: userToDelete.name,
+        deletedData: {
+          urls: urlsDeleted.deletedCount,
+          folders: foldersDeleted.deletedCount,
+          analytics: analyticsDeleted,
+          auditLogs: auditLogsDeleted.deletedCount
         }
       },
       context: {
@@ -539,9 +558,9 @@ export async function DELETE(req: NextRequest) {
         statusCode: 200
       },
       risk: {
-        level: 'high',
-        factors: ['admin_action', 'user_deletion'],
-        score: 80
+        level: 'critical',
+        factors: ['admin_action', 'permanent_user_deletion', 'data_loss'],
+        score: 95
       }
     });
 
@@ -549,7 +568,13 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'User deleted successfully'
+      message: `User and all associated data permanently deleted from database`,
+      deletedData: {
+        urls: urlsDeleted.deletedCount,
+        folders: foldersDeleted.deletedCount,
+        analytics: analyticsDeleted,
+        auditLogs: auditLogsDeleted.deletedCount
+      }
     });
 
   } catch (error) {
