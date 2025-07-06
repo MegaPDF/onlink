@@ -1,8 +1,7 @@
-import { UserSidebar } from "@/components/layout/user-sidebar";
 import { UserHeader } from "@/components/layout/user-header";
-import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { UserSidebar } from "@/components/layout/user-sidebar";
 
-export default function DashboardLayoutWrapper({
+export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;

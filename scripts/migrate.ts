@@ -37,9 +37,15 @@ async function createIndexes() {
     await URL.collection.createIndex({ shortCode: 1 }, { unique: true });
     await URL.collection.createIndex({ userId: 1, isDeleted: 1 });
     await URL.collection.createIndex({ domain: 1, shortCode: 1 });
-    await URL.collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
     await URL.collection.createIndex({ 'clicks.lastUpdated': 1 });
-    console.log('✅ URL indexes created');
+    
+    // TTL index for automatic deletion of anonymous URLs
+    await URL.collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+    
+    // NEW: Anonymous URL indexes
+    await URL.collection.createIndex({ isAnonymous: 1, createdAt: -1 });
+    await URL.collection.createIndex({ userId: 1, isAnonymous: 1 });
+    console.log('✅ URL indexes created (including anonymous support with auto-deletion)');
     
     // Domain indexes
     await Domain.collection.createIndex({ domain: 1 }, { unique: true });
@@ -91,30 +97,25 @@ async function seedDefaultData() {
   console.log('🌱 Seeding default data...');
   
   try {
-    const { User, Settings, Domain } = await loadModels();
+    const { User, Domain, Settings } = await loadModels();
     
     // Check if admin user exists
-    const existingAdmin = await User.findOne({ email: 'admin@onlink.local' });
-    let adminUser;
-    
-    if (existingAdmin) {
-      console.log('ℹ️  Admin user already exists, skipping user creation...');
-      adminUser = existingAdmin;
-    } else {
-      // Create default admin user
-      const hashedPassword = await bcrypt.hash('admin123', 12);
+    let adminUser = await User.findOne({ 
+      email: 'admin@onlink.local',
+      isDeleted: false 
+    });
+
+    if (!adminUser) {
+      console.log('👤 Creating default admin user...');
       
       adminUser = await User.create({
-        name: 'System Administrator',
+        name: 'System Admin',
         email: 'admin@onlink.local',
-        password: hashedPassword,
+        password: 'admin123', // This will be hashed by the pre-save middleware
         role: 'admin',
         plan: 'enterprise',
         isEmailVerified: true,
         isActive: true,
-        subscription: {
-          status: 'active'
-        },
         usage: {
           linksCount: 0,
           clicksCount: 0,
@@ -137,18 +138,76 @@ async function seedDefaultData() {
             publicProfile: false,
             shareAnalytics: false
           }
+        },
+        security: {
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          ipWhitelist: []
         }
       });
-
-      console.log('✅ Default admin user created');
-      console.log('📧 Email: admin@onlink.local');
-      console.log('🔑 Password: admin123');
+      
+      console.log('✅ Admin user created with email: admin@onlink.local');
+    } else {
+      console.log('ℹ️  Admin user already exists');
     }
 
-    // Check if settings exist
+    // Check if system domain exists
+    const systemDomain = await Domain.findOne({ 
+      type: 'system',
+      isDeleted: false 
+    });
+
+    if (!systemDomain) {
+      console.log('🌐 Creating default system domain...');
+      
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+      const domainName = new URL(baseUrl).host;
+      
+      await Domain.create({
+        domain: domainName,
+        type: 'system',
+        isCustom: false,
+        isVerified: true,
+        isActive: true,
+        sslEnabled: baseUrl.startsWith('https'),
+        verificationMethod: 'dns',
+        ssl: {
+          provider: 'letsencrypt',
+          autoRenew: true
+        },
+        settings: {
+          redirectType: 301,
+          forceHttps: baseUrl.startsWith('https'),
+          enableCompression: true,
+          cacheControl: 'public, max-age=3600',
+          security: {
+            enableCaptcha: false,
+            ipWhitelist: [],
+            ipBlacklist: [],
+            rateLimiting: {
+              enabled: true,
+              requestsPerMinute: 60
+            }
+          }
+        },
+        usage: {
+          linksCount: 0,
+          clicksCount: 0,
+          bandwidthUsed: 0,
+          lastUpdated: new Date()
+        }
+      });
+      
+      console.log(`✅ System domain created: ${domainName}`);
+    } else {
+      console.log('ℹ️  System domain already exists');
+    }
+
+    // Settings with pricing data
     const existingSettings = await Settings.findOne();
+    
     if (existingSettings) {
-      console.log('ℹ️  Settings already exist, updating with pricing data...');
+      console.log('🔄 Updating existing settings...');
       
       // Update existing settings with pricing data if not present
       if (!existingSettings.pricing) {
@@ -221,10 +280,28 @@ async function seedDefaultData() {
             retentionDays: 365
           },
           integrations: {
-            stripe: { enabled: false },
-            google: { enabled: false },
-            facebook: { enabled: false }
+            stripe: {
+              enabled: false,
+              publicKey: '',
+              secretKey: '',
+              webhookSecret: ''
+            },
+            google: {
+              enabled: false,
+              clientId: '',
+              clientSecret: ''
+            }
           }
+        },
+        features: {
+          enableSignup: true,
+          enableTeams: true,
+          enableCustomDomains: true,
+          enableQRCodes: true,
+          enableBulkOperations: true,
+          enableAPIAccess: true,
+          enableWhiteLabel: false,
+          maintenanceMode: false
         },
         defaultLimits: {
           free: {
@@ -257,7 +334,7 @@ async function seedDefaultData() {
           premium: {
             name: 'Premium',
             description: 'For professionals and small businesses',
-            price: { monthly: 999, yearly: 9999 }, // $9.99/month, $99.99/year
+            price: { monthly: 999, yearly: 9999 },
             stripePriceIds: { 
               monthly: 'price_premium_monthly', 
               yearly: 'price_premium_yearly' 
@@ -268,7 +345,7 @@ async function seedDefaultData() {
           enterprise: {
             name: 'Enterprise',
             description: 'For large organizations',
-            price: { monthly: 4999, yearly: 49999 }, // $49.99/month, $499.99/year
+            price: { monthly: 4999, yearly: 49999 },
             stripePriceIds: { 
               monthly: 'price_enterprise_monthly', 
               yearly: 'price_enterprise_yearly' 
@@ -276,63 +353,11 @@ async function seedDefaultData() {
             popular: false
           }
         },
-        features: {
-          enableSignup: true,
-          enableTeams: true,
-          enableCustomDomains: true,
-          enableQRCodes: true,
-          enableBulkOperations: true,
-          enableAPIAccess: true,
-          enableWhiteLabel: false,
-          maintenanceMode: false
-        },
         lastModifiedBy: adminUser._id
       });
-
+      
       console.log('✅ Default settings created with pricing data');
     }
-
-    // Check if default domain exists
-    const existingDomain = await Domain.findOne({ domain: 'localhost:3000' });
-    if (existingDomain) {
-      console.log('ℹ️  Default domain already exists, skipping domain creation...');
-    } else {
-      // Create default system domain
-      await Domain.create({
-        domain: 'localhost:3000',
-        type: 'system',
-        isCustom: false,
-        isVerified: true,
-        isActive: true,
-        sslEnabled: false,
-        settings: {
-          redirectType: 301,
-          forceHttps: false, // Development mode
-          enableCompression: true,
-          cacheControl: 'public, max-age=3600',
-          branding: {},
-          security: {
-            enableCaptcha: false,
-            ipWhitelist: [],
-            ipBlacklist: [],
-            rateLimiting: {
-              enabled: true,
-              requestsPerMinute: 60
-            }
-          }
-        },
-        usage: {
-          linksCount: 0,
-          clicksCount: 0,
-          bandwidthUsed: 0,
-          lastUpdated: new Date()
-        }
-      });
-
-      console.log('✅ Default domain created');
-    }
-    
-    console.log('🎉 Default data seeded successfully!');
     
   } catch (error) {
     console.error('❌ Error seeding default data:', error);
@@ -344,7 +369,7 @@ async function updateExistingData() {
   console.log('🔄 Updating existing data...');
   
   try {
-    const { User, Settings } = await loadModels();
+    const { User, Settings, URL } = await loadModels();
     
     // Update users without proper subscription status
     const usersWithoutSubscriptionStatus = await User.find({
@@ -365,6 +390,57 @@ async function updateExistingData() {
       console.log('✅ User subscription status updated');
     }
     
+    // NEW: Update URLs to support anonymous schema
+    console.log('🔄 Updating URL schema for anonymous support...');
+    
+    // Get the URL collection directly for bulk operations
+    if (!mongoose.connection.db) {
+      throw new Error('Database connection is not established');
+    }
+    const urlCollection = mongoose.connection.db.collection('urls');
+    
+    // Update existing URLs to support anonymous schema
+    const urlUpdateResult = await urlCollection.updateMany(
+      {
+        // Update documents that don't have the new fields
+        $or: [
+          { isAnonymous: { $exists: false } },
+          { createdBy: { $exists: false } }
+        ]
+      },
+      {
+        $set: {
+          isAnonymous: false,
+          createdBy: 'user'
+        }
+      }
+    );
+
+    console.log(`✅ Updated ${urlUpdateResult.modifiedCount} URLs with anonymous support fields`);
+
+    // Check for URLs with null userId (shouldn't exist yet, but good to check)
+    const nullUserCount = await urlCollection.countDocuments({ 
+      userId: null 
+    });
+
+    if (nullUserCount > 0) {
+      console.log(`⚠️  Found ${nullUserCount} URLs with null userId`);
+      
+      // Update these to be marked as anonymous
+      await urlCollection.updateMany(
+        { userId: null },
+        {
+          $set: {
+            isAnonymous: true,
+            createdBy: 'anonymous',
+            isPublic: true
+          }
+        }
+      );
+      
+      console.log(`✅ Marked ${nullUserCount} URLs as anonymous`);
+    }
+
     // Update settings with pricing data if missing
     const settings = await Settings.findOne();
     if (settings && !settings.pricing) {
@@ -425,23 +501,24 @@ async function migrate() {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ Connected to MongoDB');
     
-    // Create indexes
+    // Create indexes (including new anonymous URL indexes)
     await createIndexes();
     
     // Seed default data (includes admin user and settings with pricing)
     await seedDefaultData();
     
-    // Update existing data
+    // Update existing data (including URL schema updates)
     await updateExistingData();
     
     console.log('🎉 Database migration completed successfully!');
     console.log('');
     console.log('📋 Summary:');
-    console.log('  ✅ Database indexes created');
+    console.log('  ✅ Database indexes created (including anonymous URL support)');
     console.log('  ✅ Default admin user created/verified');
     console.log('  ✅ Settings with pricing data initialized');
     console.log('  ✅ Default domain configured');
     console.log('  ✅ Existing data updated');
+    console.log('  ✅ URL schema updated for anonymous support');
     console.log('');
     console.log('🔐 Admin Login:');
     console.log('  📧 Email: admin@onlink.local');
@@ -452,11 +529,18 @@ async function migrate() {
     console.log('  ⭐ Premium: $9.99/month - Unlimited links & clicks');
     console.log('  🚀 Enterprise: $49.99/month - All features');
     console.log('');
+    console.log('🔧 Anonymous URL Features:');
+    console.log('  🌐 Public API: /api/public/shorten');
+    console.log('  ⏰ Auto-delete: 30 days (MongoDB TTL)');
+    console.log('  🔒 Limited features: Basic shortening + QR codes');
+    console.log('  🗑️  No cleanup job needed - automatic deletion');
+    console.log('');
     console.log('🔧 Next Steps:');
     console.log('  1. Update Stripe price IDs in admin settings');
     console.log('  2. Configure SMTP settings for emails');
     console.log('  3. Set up custom domain if needed');
     console.log('  4. Review and adjust pricing/limits as needed');
+    console.log('  5. Test anonymous URL creation at /api/public/shorten');
     
   } catch (error) {
     console.error('❌ Migration failed:', error);
